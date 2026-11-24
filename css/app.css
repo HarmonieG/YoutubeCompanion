@@ -321,3 +321,34 @@ details.manual summary { cursor: pointer; color: var(--muted); }
   .qrow button { margin-left: auto; }
   .qrow button + button { margin-left: 0; }
 }
+
+/* ---------- cloche des nouveautés ---------- */
+.bell { position: relative; width: 2.2rem; height: 2.2rem; padding: 0; justify-content: center; color: var(--muted); border-radius: 50%; }
+.bell:hover { color: var(--text); background: var(--bg3); }
+.bell.new { color: var(--text); }
+.bell .dot { position: absolute; top: .05rem; right: .05rem; min-width: 1.05rem; height: 1.05rem; border-radius: 99px; background: var(--coral); color: var(--bg);
+  font-size: .68rem; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 .25rem; border: 2px solid var(--bg); }
+.bell.new svg { animation: ring 1.2s ease-in-out 2; transform-origin: 50% 10%; }
+@keyframes ring { 0%, 100% { transform: rotate(0); } 15% { transform: rotate(14deg); } 30% { transform: rotate(-12deg); } 45% { transform: rotate(8deg); } 60% { transform: rotate(-5deg); } }
+#picker:has(.changelog) { width: min(560px, 94vw); }
+.changelog { max-height: 80vh; overflow: auto; }
+.changelog .cl { border-top: 1px solid var(--line); padding-top: .6rem; }
+.changelog .cl:first-of-type { border-top: 0; padding-top: 0; }
+.changelog h4 { margin: 0; color: var(--text); font-size: 1rem; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.changelog .hint { margin: .1rem 0 .3rem; }
+.changelog ul { margin: 0 0 .6rem; padding-left: 1.1rem; font-size: .9rem; }
+.changelog li { margin-bottom: .3rem; }
+.newtag { background: var(--coral); color: var(--bg); font-family: var(--font); font-size: .68rem; font-weight: 700; padding: .05em .5em; border-radius: 99px; }
+.cl.unread h4 { color: var(--coral); }
+
+.seenbanner { width: 100%; justify-content: flex-start; border-radius: var(--radius); background: var(--bg2); border: 1px solid var(--coral);
+  padding: .7rem 1rem; margin: -.5rem 0 1.4rem; text-align: left; gap: .5rem; }
+.seenbanner span { margin-left: auto; color: var(--coral); font-weight: 600; white-space: nowrap; }
+.seenbanner:hover { background: var(--bg3); }
+
+#nav .gear { display: none; font-size: 1.1rem; }
+@media (max-width: 640px) {
+  #nav .gear { display: inline; }
+  #nav .lbl-settings { display: none; }
+  #nav button { padding: .45em .65em; }
+}

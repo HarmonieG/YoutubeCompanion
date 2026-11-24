@@ -165,3 +165,15 @@ test('pondération de l\'historique par la durée (API simulée)', async () => {
   assert.ok(ch.UCl.times.some((t) => t[1] === 10), JSON.stringify(ch.UCl.times));   // supprimée : 10 min par défaut
   assert.equal(historyDurationsTodo().length, 0);
 });
+
+test('journal des nouveautés : lecture de CHANGELOG.md', async () => {
+  const fs = await import('node:fs');
+  const { parseChangelog } = await import('../js/changelog.js');
+  const entries = parseChangelog(fs.readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8'));
+  assert.ok(entries.length >= 3);
+  assert.match(entries[0].version, /^\d+\.\d+\.\d+$/);
+  assert.ok(entries[0].date && entries[0].title && entries[0].items.length);
+  // les versions sont rangées de la plus récente à la plus ancienne
+  const n = (v) => v.split('.').reduce((a, x) => a * 1000 + Number(x), 0);
+  for (let i = 1; i < entries.length; i++) assert.ok(n(entries[i - 1].version) > n(entries[i].version));
+});

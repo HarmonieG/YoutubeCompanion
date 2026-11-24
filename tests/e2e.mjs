@@ -124,14 +124,27 @@ await page.click('[data-act=close]');
 log('à retirer', await page.evaluate(() => Object.values(window.__yc.store.state.videos).filter((v) => v.status === 'queued').length));
 
 // ---------- suggestions de retrait ----------
-await page.click('[data-go=queue]');
+await page.click('[data-go=home]');
+log('rappel accueil :', (await page.locator('.seenbanner').innerText()).replace(/\n/g, ' '));
+await page.click('.seenbanner');
 await page.waitForSelector('.qlist.sug');
-log('onglet', (await page.locator('#nav [data-go=queue]').innerText()).replace(/\n/g, ' '), '|', (await page.locator('.panel p').first().innerText()).slice(0, 90));
+log('onglet', (await page.locator('#nav [data-go=seen]').innerText()).replace(/\n/g, ' '), '|', (await page.locator('.panel p').first().innerText()).slice(0, 90));
 log('1re suggestion :', (await page.locator('.qlist.sug .qrow small').first().innerText()));
 await page.screenshot({ path: `${OUT}/09-suggestions.png` });
 await page.locator('.qlist.sug [data-act=keep-sug]').first().click();
 await page.click('[data-act=sug-all][data-min="2"]');
 log('après « retirer les sûres » :', await page.evaluate(() => Object.values(window.__yc.store.state.videos).filter((v) => v.status === 'queued').length), 'en file');
+
+// ---------- nouveautés ----------
+await page.evaluate(() => localStorage.setItem('yc-changelog-seen', '0.1.0'));
+await page.evaluate(() => window.__yc.render());
+log('cloche :', await page.locator('.bell .dot').innerText(), 'non lues');
+await page.click('.bell');
+await page.waitForSelector('.changelog .cl');
+log('journal :', await page.locator('.changelog .cl').count(), 'versions, première :', await page.locator('.changelog h4').first().innerText());
+await page.screenshot({ path: `${OUT}/12-nouveautes.png` });
+await page.click('#picker [data-act=pickclose]');
+log('après lecture, pastille :', await page.locator('.bell .dot').count());
 
 await page.click('[data-go=settings]');
 await page.screenshot({ path: `${OUT}/08-reglages.png` });

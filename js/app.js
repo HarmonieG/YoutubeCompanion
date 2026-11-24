@@ -13,6 +13,7 @@ import {
 import { auth, driveLoad, driveSave, fetchMyPlaylists, addToPlaylist, createPlaylist } from './google.js';
 import { Player } from './player.js';
 import { BOOKMARKLETS } from './bookmarklets.js';
+import { changelog } from './changelog.js';
 
 // ---------------------------------------------------------------- utilitaires
 const $ = (s, el = document) => el.querySelector(s);
@@ -181,6 +182,7 @@ function render() {
   document.body.dataset.view = ui.view;
   if (ui.view === 'setup') main.innerHTML = renderSetup();
   else if (ui.view === 'queue') main.innerHTML = renderQueue();
+  else if (ui.view === 'seen') main.innerHTML = renderSeen();
   else if (ui.view === 'settings') main.innerHTML = renderImport() + renderSettings();
   else if (ui.view === 'library') main.innerHTML = renderLibrary();
   else main.innerHTML = renderHome();
@@ -204,12 +206,17 @@ function renderHeader() {
   $('#nav').innerHTML = ui.view === 'setup' ? '' : [
     ['home', 'Accueil'],
     ['library', `Liste <small>${a}</small>`],
-    ['queue', `À retirer ${q ? `<small class="hot">${q}</small>` : ''}${sugN ? `<small class="sugn" title="Déjà vues encore dans la liste">+${sugN}</small>` : ''}`],
-    ['settings', 'Réglages'],
-  ].map(([v, l]) => `<button class="${ui.view === v ? 'on' : ''}" data-go="${v}">${l}</button>`).join('');
+    ['seen', `Déjà vues ${sugN ? `<small class="hot">${sugN}</small>` : ''}`],
+    ['queue', `À retirer ${q ? `<small class="hot">${q}</small>` : ''}`],
+    ['settings', '<span class="gear" aria-hidden="true">⚙︎</span><span class="lbl-settings">Réglages</span>'],
+  ].map(([v, l]) => `<button class="${ui.view === v ? 'on' : ''}" data-go="${v}" ${v === 'settings' ? 'title="Réglages" aria-label="Réglages"' : ''}>${l}</button>`).join('');
   const syncIcon = { off: '', idle: '☁︎', saving: '⟳', error: '⚠︎' }[auth.signedIn && settings().sync ? syncState : 'off'];
+  const unread = changelog.unread().length;
+  const bell = `<button class="bell ${unread ? 'new' : ''}" data-act="changelog" title="Nouveautés${unread ? ` (${unread} non lue${unread > 1 ? 's' : ''})` : ''}" aria-label="Nouveautés">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-1.7 1.7A1 1 0 0 0 4 19.4h16a1 1 0 0 0 .7-1.7Z"/></svg>
+      ${unread ? `<span class="dot">${unread}</span>` : ''}</button>`;
   $('#account').innerHTML = auth.signedIn
-    ? `<span class="sync ${syncState}" title="Synchro Google Drive">${syncIcon}</span><button class="ghost" data-act="signout" title="Se déconnecter">${esc(auth.user?.title || 'Connecté')}</button>`
+    ? `<span class="sync ${syncState}" title="Synchro Google Drive">${syncIcon}</span>${bell}<button class="ghost" data-act="signout" title="Se déconnecter">${esc(auth.user?.title || 'Connecté')}</button>`
     : `<button class="primary small" data-act="signin">Connexion Google</button>`;
 }
 
@@ -242,6 +249,7 @@ function renderHome() {
         <button class="ghost small" data-act="surprise">🎲 Surprends-moi</button>
       </div>
     </section>
+    ${(() => { const n = removalSuggestions().length; return n ? `<button class="seenbanner" data-go="seen">🧹 <b>${n} vidéo${n > 1 ? 's' : ''} déjà vue${n > 1 ? 's' : ''}</b> traîne${n > 1 ? 'nt' : ''} encore dans ta liste <span>Trier →</span></button>` : ''; })()}
     ${shelves.map(renderShelf).join('')}`;
 }
 
@@ -416,6 +424,32 @@ function toggleTagFilter(tag) {
   else if (!ui.filters[i].neg) ui.filters[i].neg = true;
   else ui.filters.splice(i, 1);
   ui.limit = 60;
+}
+
+// ---------------------------------------------------------------- nouveautés
+function renderChangelog() {
+  const unread = new Set(changelog.unread().map((e) => e.version));
+  const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`(.+?)`/g, '<code>$1</code>');
+  return `<div class="pick changelog">
+    <h3>🔔 Nouveautés</h3>
+    ${changelog.entries.length ? changelog.entries.map((e) => `<section class="cl ${unread.has(e.version) ? 'unread' : ''}">
+      <h4>${e.title ? esc(e.title) : 'Version ' + esc(e.version)} ${unread.has(e.version) ? '<span class="newtag">Nouveau</span>' : ''}</h4>
+      <p class="hint">v${esc(e.version)}${e.date ? ' · ' + esc(e.date) : ''}</p>
+      <ul>${e.items.map((i) => `<li>${inline(i)}</li>`).join('')}</ul>
+    </section>`).join('') : '<p class="hint">Impossible de charger le journal pour l\'instant.</p>'}
+    <div class="row"><button class="primary small" data-act="pickclose">OK</button></div>
+  </div>`;
+}
+
+async function openChangelog() {
+  if (!changelog.entries.length) await changelog.load();
+  const dlg = $('#picker');
+  dlg.dataset.mode = 'changelog';
+  dlg.innerHTML = renderChangelog();
+  if (!dlg.open) dlg.showModal();
+  dlg.scrollTop = 0;
+  changelog.markSeen();
+  renderHeader();
 }
 
 // ---------------------------------------------------------------- « Pourquoi cette vidéo ? »
@@ -658,9 +692,15 @@ async function addTo(pl, title, videoId) {
 }
 
 // ---------------------------------------------------------------- file de retrait
-function renderSuggestions() {
+function renderSeen() {
   const sug = removalSuggestions();
-  if (!sug.length) return '';
+  if (!sug.length) {
+    return `<section class="empty">
+      <h2>🧹 Rien à trier</h2>
+      <p>Aucune vidéo déjà vue ne traîne dans ta liste « À regarder plus tard ».</p>
+      <p class="hint">Companion repère les vidéos vues grâce à la barre de progression YouTube (lue à chaque synchro), à ce que tu regardes ici et à ton historique.</p>
+    </section>`;
+  }
   const sure = sug.filter((x) => x.certainty >= 2).length;
   const label = { 3: 'Vue', 2.5: 'Indisponible', 2: 'Vue', 1: 'Probable' };
   return `<section class="panel">
@@ -682,7 +722,7 @@ function renderSuggestions() {
 function renderQueue() {
   const q = videosByStatus('queued').sort((a, b) => (b.queuedAt || 0) - (a.queuedAt || 0));
   const removed = videosByStatus('removed').length;
-  return renderSuggestions() + `<section class="panel">
+  return `<section class="panel">
     <h2>Prêtes à être retirées de YouTube ${q.length ? `<small>${q.length}</small>` : ''}</h2>
     <p>Ces vidéos sont masquées dans l'app. Elles seront retirées de « À regarder plus tard » à la prochaine synchro, grâce au script Companion.</p>
     <div class="row">
@@ -1146,6 +1186,7 @@ document.addEventListener('click', async (e) => {
       break;
     }
     case 'why': e.stopPropagation(); openWhy(id, cardEl?.dataset.shelf); break;
+    case 'changelog': openChangelog(); break;
     case 'why-modal': if (current) openWhy(current.id); break;
     case 'boost': {
       const k = el.closest('[data-k]').dataset.k;
@@ -1405,6 +1446,7 @@ $('#video').addEventListener('cancel', (e) => { e.preventDefault(); closeVideo()
 (async function init() {
   await store.load();
   auth.restore();
+  changelog.load().then(() => { changelog.initSeen(Object.keys(st().videos).length > 0); renderHeader(); });
   listenForScript();
   if (!settings().setupDone) ui.view = 'setup';
   render();
