@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Companion — synchro « À regarder plus tard »
 // @namespace    https://harmonieg.github.io/YoutubeCompanion/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Récupère ta playlist « À regarder plus tard » en quelques secondes, retire les vidéos déjà vues et envoie le tout à YouTube Companion.
 // @author       Harmonie Games
 // @match        https://www.youtube.com/*
@@ -10,6 +10,8 @@
 // @updateURL    https://harmonieg.github.io/YoutubeCompanion/companion.user.js
 // @downloadURL  https://harmonieg.github.io/YoutubeCompanion/companion.user.js
 // @grant        none
+// @inject-into  auto
+// @noframes
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -49,7 +51,7 @@
     msg = el('div', '');
     actions = el('div', 'margin-top:4px;');
     panel.append(head, msg, actions);
-    document.body.appendChild(panel);
+    (document.body || document.documentElement).appendChild(panel);
   }
   const say = (t) => { openPanel(); msg.textContent = t; };
   const setActions = (...buttons) => { openPanel(); actions.replaceChildren(...buttons); };
@@ -86,7 +88,50 @@
     if (p3) parts.push('SAPISID3PHASH ' + ts + '_' + await sha1(ts + ' ' + p3 + ' ' + origin));
     return parts.join(' ');
   }
-  function cfg(k) { try { return window.ytcfg && window.ytcfg.get(k); } catch (e) { return undefined; } }
+  // Configuration de youtube.com. Selon l'extension (Userscripts sur iOS, Tampermonkey…), le script peut
+  // tourner dans un espace isolé sans accès à window.ytcfg : on la relit alors dans le HTML de la page.
+  let pageCfg = null;
+  function readCfgFromHtml() {
+    const out = {};
+    for (const sc of document.querySelectorAll('script')) {
+      const t = sc.textContent || '';
+      if (!t.includes('INNERTUBE')) continue;
+      const ctxAt = t.indexOf('"INNERTUBE_CONTEXT":');
+      if (ctxAt !== -1 && !out.INNERTUBE_CONTEXT) {
+        let i = t.indexOf('{', ctxAt), depth = 0, inStr = false;
+        for (let j = i; j < t.length; j++) {
+          const c = t[j];
+          if (inStr) { if (c === '\\') j++; else if (c === '"') inStr = false; continue; }
+          if (c === '"') inStr = true;
+          else if (c === '{') depth++;
+          else if (c === '}' && --depth === 0) { try { out.INNERTUBE_CONTEXT = JSON.parse(t.slice(i, j + 1)); } catch (e) { /* rien */ } break; }
+        }
+      }
+      for (const k of ['INNERTUBE_API_KEY', 'INNERTUBE_CLIENT_VERSION', 'INNERTUBE_CONTEXT_CLIENT_NAME', 'SESSION_INDEX']) {
+        if (out[k] != null) continue;
+        const m = t.match(new RegExp('"' + k + '":\\s*"?([\\w.-]+)"?'));
+        if (m) out[k] = m[1];
+      }
+    }
+    if (!out.INNERTUBE_CONTEXT) {
+      const mobile = location.hostname.startsWith('m.');
+      out.INNERTUBE_CONTEXT = {
+        client: {
+          clientName: mobile ? 'MWEB' : 'WEB',
+          clientVersion: out.INNERTUBE_CLIENT_VERSION || '2.20261120.00.00',
+          hl: (document.documentElement.lang || 'fr').slice(0, 2),
+          gl: 'FR',
+        },
+      };
+      out.INNERTUBE_CONTEXT_CLIENT_NAME = out.INNERTUBE_CONTEXT_CLIENT_NAME || (mobile ? 2 : 1);
+    }
+    return out;
+  }
+  function cfg(k) {
+    try { if (window.ytcfg && window.ytcfg.get) { const v = window.ytcfg.get(k); if (v != null) return v; } } catch (e) { /* espace isolé */ }
+    pageCfg ||= readCfgFromHtml();
+    return pageCfg[k];
+  }
 
   async function innertube(endpoint, body) {
     const context = cfg('INNERTUBE_CONTEXT');
@@ -254,7 +299,8 @@
   if (m) {
     const ids = (m[1] || '').split(',').filter((x) => /^[\w-]{11}$/.test(x));
     history.replaceState(null, '', location.pathname + location.search);
-    const start = () => (cfg('INNERTUBE_CONTEXT') ? run(ids) : setTimeout(start, 500));
-    start();
+    say('Préparation de la synchro…');
+    // Laisse YouTube finir de charger, puis on y va (la config a toujours une valeur de repli).
+    setTimeout(() => run(ids), window.ytcfg ? 300 : 1500);
   }
 })();

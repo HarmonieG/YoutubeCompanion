@@ -28,6 +28,7 @@ const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome'
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
 const errors = [];
 let authSeen = '';
+let isoContext = null;
 await ctx.route(/fonts\.(googleapis|gstatic)|ytimg|accounts\.google|googleapis\.com/, (r) => r.abort());
 await ctx.addInitScript(() => {
   if (location.hostname === 'localhost') localStorage.setItem('yc-token', JSON.stringify({ access_token: 't', expires_at: Date.now() + 3600e3 }));
@@ -43,6 +44,7 @@ await ctx.route('https://www.youtube.com/**', async (r) => {
   if (url.includes('/youtubei/v1/browse')) {
     authSeen = r.request().headers().authorization || '';
     const body = JSON.parse(r.request().postData());
+    if (url.includes('key=AIzaFake')) isoContext = body.context;
     let json;
     if (body.browseId === 'VLWL') {
       json = { contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { content: { sectionListRenderer: { contents: [{ itemSectionRenderer: { contents: [{ playlistVideoListRenderer: { contents: page(0, 100, 'p1') } }] } }] } } } }] } } };
@@ -52,6 +54,12 @@ await ctx.route('https://www.youtube.com/**', async (r) => {
       json = { onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: page(200, 100, null) } }] };
     }
     return r.fulfill({ contentType: 'application/json', body: JSON.stringify(json) });
+  }
+  if (url.includes('iso=1')) {
+    return r.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<html><body><h1>Faux YouTube (isolé)</h1><script>document.cookie='SAPISID=abc;path=/';var cfgset=function(){};cfgset({"INNERTUBE_API_KEY":"AIzaFake","INNERTUBE_CONTEXT":{"client":{"clientName":"MWEB","clientVersion":"2.2026","hl":"fr"},"user":{"note":"a \\"quoted\\" } brace"}},"INNERTUBE_CLIENT_VERSION":"2.2026"});</script></body></html>`,
+    });
   }
   return r.fulfill({
     contentType: 'text/html; charset=utf-8',
@@ -117,6 +125,16 @@ await popup.click('[data-go=import]');
 await popup.click('[data-act=paste]');
 await popup.waitForSelector('text=Import :', { timeout: 5000 });
 console.log('collage OK');
+
+// 6) Script dans un espace isolé (cas Userscripts sur iOS) : config lue dans le HTML
+const iso = await ctx.newPage();
+iso.on('pageerror', (e) => errors.push('iso: ' + e.message));
+await iso.goto('https://www.youtube.com/playlist?list=WL&iso=1#yc-sync');
+await iso.evaluate(USERSCRIPT);
+await iso.waitForSelector('text=Préparation de la synchro', { timeout: 3000 });
+console.log('panneau immédiat OK');
+await iso.waitForSelector('text=vidéos récupérées', { timeout: 15000 });
+console.log('espace isolé : contexte lu dans le HTML', JSON.stringify(isoContext));
 
 console.log('ERREURS', errors);
 await browser.close();
