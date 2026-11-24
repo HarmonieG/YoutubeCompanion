@@ -477,14 +477,20 @@ function renderQueue() {
   const removed = videosByStatus('removed').length;
   return `<section class="panel">
     <h2>À retirer de YouTube</h2>
-    <p>L'API YouTube ne permet pas de modifier « À regarder plus tard ». Les vidéos retirées ici sont donc masquées dans l'app, puis supprimées de YouTube en une fois depuis un ordinateur :</p>
-    <ol class="steps">
-      <li>Installe le favori <a class="bm" href="${esc(BOOKMARKLETS.purge.href)}" onclick="return false" draggable="true">${BOOKMARKLETS.purge.name}</a> (glisse-le dans ta barre de favoris) — ou <button class="linkbtn" data-act="copycode" data-bm="purge">copie le code</button> pour la console.</li>
-      <li><button class="primary small" data-act="copyids" ${q.length ? '' : 'disabled'}>Copier la liste (${q.length})</button></li>
-      <li>Sur youtube.com, clique sur le favori et colle la liste.</li>
-      <li><button class="ghost small" data-act="purged" ${q.length ? '' : 'disabled'}>C'est fait : marquer comme retirées</button></li>
-    </ol>
-    <p class="hint">Astuce : au prochain import de ta liste, les vidéos qui n'y sont plus sont automatiquement marquées comme retirées.${removed ? ` ${removed} vidéo(s) déjà retirée(s) au total.` : ''}</p>
+    <p>Ces vidéos sont masquées dans l'app. Elles seront retirées de « À regarder plus tard » à la prochaine synchro, grâce au script Companion.</p>
+    <div class="row">
+      <a class="primary btn ${q.length ? '' : 'disabled'}" href="${syncUrl()}" data-act="syncyt">⟳ Synchroniser et retirer (${q.length})</a>
+      <button class="linkbtn" data-go="import">Installer le script</button>
+    </div>
+    <details class="manual">
+      <summary>Sans le script (favori sur ordinateur)</summary>
+      <ol class="steps">
+        <li>Installe le favori <a class="bm" href="${esc(BOOKMARKLETS.purge.href)}" onclick="return false" draggable="true">${BOOKMARKLETS.purge.name}</a> (glisse-le dans ta barre de favoris) — ou <button class="linkbtn" data-act="copycode" data-bm="purge">copie le code</button> pour la console.</li>
+        <li><button class="ghost small" data-act="copyids" ${q.length ? '' : 'disabled'}>Copier la liste (${q.length})</button> puis, sur youtube.com, clique sur le favori et colle-la.</li>
+        <li><button class="ghost small" data-act="purged" ${q.length ? '' : 'disabled'}>C'est fait : marquer comme retirées</button></li>
+      </ol>
+    </details>
+    <p class="hint">À chaque synchro, les vidéos qui ne sont plus dans ta liste YouTube sont marquées comme retirées.${removed ? ` ${removed} vidéo(s) retirée(s) au total.` : ''}</p>
   </section>
   ${q.length ? `<section class="qlist">${q.map((v) => `<div class="qrow" data-id="${v.id}">
       <img loading="lazy" src="${esc(thumbOf(v))}" alt="">
@@ -503,14 +509,38 @@ function bookmarkletBlock(kind, label) {
   </div>`;
 }
 
+const USERSCRIPT_URL = new URL('companion.user.js', location.href).href;
+
+function syncUrl() {
+  const ids = videosByStatus('queued').map((v) => v.id);
+  return 'https://www.youtube.com/playlist?list=WL#yc-sync' + (ids.length ? '=' + ids.join(',') : '');
+}
+
 function wlSteps() {
-  return `<ol class="steps">
-    <li>Sur un <b>ordinateur</b>, glisse ce bouton dans ta barre de favoris :
-      ${bookmarkletBlock('export', '')}</li>
-    <li>Ouvre <a href="https://www.youtube.com/playlist?list=WL" target="_blank" rel="noopener">youtube.com/playlist?list=WL</a>, connecté à ton compte, puis clique sur le favori. La page défile toute seule (1 à 2 min pour 3 000 vidéos) et un fichier JSON est téléchargé.</li>
-    <li>Importe ce fichier ici. Tu peux aussi utiliser le CSV « À regarder plus tard » de Google Takeout s'il figure dans ton export.</li>
+  const q = videosByStatus('queued').length;
+  return `<h3>Synchro automatique <small>(recommandé)</small></h3>
+  <ol class="steps">
+    <li>Installe une extension de scripts :
+      <b>iPhone/iPad</b> : <a href="https://apps.apple.com/app/userscripts/id1463298887" target="_blank" rel="noopener">Userscripts</a> (gratuite), puis active-la dans Réglages → Safari → Extensions, autorisée sur youtube.com.
+      <b>Ordinateur</b> : <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>.</li>
+    <li>Installe le script : <a class="bm" href="${USERSCRIPT_URL}" target="_blank" rel="noopener">⟳ Script Companion</a>
+      <small>(sur iPhone : ouvre le lien dans Safari, touche l'icône Userscripts dans la barre d'adresse puis « Install »)</small></li>
+    <li>Touche <b>Synchroniser</b> : YouTube s'ouvre, ${q ? `retire les ${q} vidéo(s) marquée(s), ` : ''}lit ta liste en quelques secondes, puis touche « Envoyer à Companion ».</li>
   </ol>
-  <label class="drop" data-drop="wl"><input type="file" accept=".json,.csv,.txt" data-file="wl" hidden><span>📂 Choisir le fichier de ma liste</span></label>`;
+  <div class="row">
+    <a class="primary btn" href="${syncUrl()}" data-act="syncyt">⟳ Synchroniser${q ? ` (et retirer ${q})` : ''}</a>
+    <button class="ghost small" data-act="paste">Coller depuis le presse-papiers</button>
+  </div>
+  <p class="hint">Sur iPhone, si l'app YouTube s'ouvre à la place de Safari : appui long sur « Synchroniser » → « Ouvrir dans un nouvel onglet ». Si l'envoi n'arrive pas, utilise « Copier » dans le script puis « Coller » ici.</p>
+  <details class="manual">
+    <summary>Autres méthodes (fichier, favori)</summary>
+    <ol class="steps">
+      <li>Sur ordinateur, glisse ce bouton dans ta barre de favoris : ${bookmarkletBlock('export', '')}</li>
+      <li>Ouvre <a href="https://www.youtube.com/playlist?list=WL" target="_blank" rel="noopener">youtube.com/playlist?list=WL</a> et clique sur le favori : un fichier JSON est téléchargé.</li>
+      <li>Importe ce fichier ici (le CSV « À regarder plus tard » de Google Takeout marche aussi).</li>
+    </ol>
+    <label class="drop" data-drop="wl"><input type="file" accept=".json,.csv,.txt" data-file="wl" hidden><span>📂 Choisir un fichier</span></label>
+  </details>`;
 }
 
 function historySteps() {
@@ -905,6 +935,8 @@ document.addEventListener('click', async (e) => {
       if (await confirmBox('Confirmer que la purge a bien été faite sur YouTube ?')) { const n = markPurged(); toast(`${n} vidéos marquées comme retirées`); render(); }
       break;
     }
+    case 'paste': pasteFromClipboard(); break;
+    case 'syncyt': if (!videosByStatus('queued').length && el.classList.contains('disabled')) e.preventDefault(); break;
     case 'enrich': runEnrich(false); break;
     case 'enrichall': runEnrich(true); break;
     case 'fav': case 'ban': toggleChannelList(act === 'fav' ? 'favChannels' : 'bannedChannels', el.closest('[data-chan]').dataset.chan); render(); break;
@@ -963,6 +995,56 @@ async function restoreBackup(file) {
   } catch (e) { toast('Restauration impossible : ' + e.message); }
 }
 
+// ---------------------------------------------------------------- réception depuis le script YouTube
+const YT_ORIGINS = ['https://www.youtube.com', 'https://m.youtube.com'];
+const bc = 'BroadcastChannel' in window ? new BroadcastChannel('yc') : null;
+if (bc) bc.onmessage = async (e) => { if (e.data === 'reload') { await store.load(); ctx = null; render(); } };
+
+function applyPayload(payload, how) {
+  if (!payload || payload.source !== 'plustard-wl' || !Array.isArray(payload.items)) throw new Error('données non reconnues');
+  const items = parseWatchLater(JSON.stringify(payload));
+  if (!items.length) throw new Error('liste vide');
+  const r = importWatchLater(items);
+  store.persistNow(true).then(() => bc?.postMessage('reload'));
+  toast(`${how} : ${r.total} vidéos, ${r.added} nouvelles${r.purged ? `, ${r.purged} retirées de YouTube` : ''}${r.gone ? `, ${r.gone} disparues` : ''}`);
+  if (Object.values(st().videos).some((v) => !v.enriched) && auth.signedIn) {
+    enrichVideos().then(() => render()).catch(() => {});
+  }
+  if (ui.view === 'setup' && ui.setupStep === 1) ui.setupStep = 2;
+  render();
+}
+
+function listenForScript() {
+  if (location.hash !== '#yc-recv') return;
+  history.replaceState(null, '', location.pathname + location.search);
+  let done = false;
+  toast('Réception de ta liste depuis YouTube…');
+  window.addEventListener('message', (e) => {
+    if (!YT_ORIGINS.includes(e.origin) || e.data?.type !== 'yc-wl' || done) return;
+    done = true;
+    try { applyPayload(e.data.payload, 'Synchro YouTube'); } catch (err) { toast('Synchro impossible : ' + err.message); }
+    try { e.source.postMessage({ type: 'yc-ack' }, e.origin); } catch { /* onglet fermé */ }
+  });
+  const ping = () => {
+    if (done || !window.opener) return;
+    for (const o of YT_ORIGINS) { try { window.opener.postMessage({ type: 'yc-ready' }, o); } catch { /* rien */ } }
+    setTimeout(ping, 600);
+  };
+  ping();
+  setTimeout(() => { if (!done) toast('Rien reçu de YouTube. Utilise « Copier » dans le script puis « Coller depuis le presse-papiers » ici.'); }, 15000);
+}
+
+async function pasteFromClipboard() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); }
+  catch { text = window.prompt('Colle ici les données copiées depuis YouTube :') || ''; }
+  if (!text.trim()) return;
+  try {
+    const data = JSON.parse(text);
+    applyPayload(data, 'Import');
+  } catch (e) { toast('Collage impossible : ' + e.message); }
+}
+
 // Fermeture du lecteur avec Échap / geste retour
 $('#video').addEventListener('cancel', (e) => { e.preventDefault(); closeVideo(); });
 
@@ -970,6 +1052,7 @@ $('#video').addEventListener('cancel', (e) => { e.preventDefault(); closeVideo()
 (async function init() {
   await store.load();
   auth.restore();
+  listenForScript();
   if (!settings().setupDone && !Object.keys(st().videos).length) ui.view = 'setup';
   render();
   if (auth.signedIn) pullSync();

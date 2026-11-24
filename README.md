@@ -25,28 +25,36 @@ Statique (HTML/CSS/JS sans build), hébergée sur GitHub Pages. Tes données res
 - **Configuration guidée** au premier lancement
 - Installable sur l'écran d'accueil (PWA)
 
-## Pourquoi un favori (bookmarklet) ?
+## Pourquoi un script ?
 
 Depuis 2016, **l'API YouTube ne donne plus accès à « À regarder plus tard » ni à l'historique** : les requêtes renvoient une liste vide, même connecté. L'app contourne cette limite ainsi :
 
 | Besoin | Méthode |
 |---|---|
-| Lire la liste | Favori **⤓ Export Plus Tard** lancé sur youtube.com/playlist?list=WL (ordinateur), qui télécharge un JSON. Le CSV de Google Takeout est aussi accepté. |
+| Lire la liste | **Script Companion** (`companion.user.js`) qui tourne sur youtube.com et interroge l'API interne du site : environ 3 000 vidéos en une dizaine de secondes, sans faire défiler la page. En secours : favori d'export ou CSV Google Takeout. |
+| Retirer les vidéos vues | Le même script, pendant la synchro (ou favori de purge sur ordinateur) |
 | Historique | Export **Google Takeout** (`watch-history.json` ou `.html`) |
 | Durée, tags, catégorie, abonnements | API YouTube Data v3, via la connexion Google |
 | Ajouter à une playlist | API YouTube Data v3 |
-| Retirer de « À regarder plus tard » | Favori **✕ Purge Plus Tard** sur youtube.com : il retire d'un coup toutes les vidéos marquées dans l'onglet « À retirer » |
 
-Les favoris s'exécutent dans ta session YouTube déjà ouverte. Ils n'envoient rien ailleurs et ne fonctionnent pas sur mobile (sur ordinateur, ou via la console du navigateur).
+Le script n'envoie rien ailleurs qu'à l'app : il lui transmet la liste par `postMessage`, ou en repli par le presse-papiers ou un fichier. Il fonctionne avec **Tampermonkey** sur ordinateur et l'extension Safari **Userscripts** (gratuite) sur iPhone/iPad.
+
+⚠️ L'API interne de youtube.com n'est pas documentée : si YouTube la modifie, le script peut cesser de fonctionner jusqu'à sa mise à jour.
+
+### Déroulé d'une synchro
+
+1. Dans l'app, **Synchroniser** ouvre `youtube.com/playlist?list=WL#yc-sync=<vidéos à retirer>`.
+2. Le script retire ces vidéos, puis lit toute la liste.
+3. **Envoyer à Companion** ouvre l'app, qui reçoit la liste : les nouvelles vidéos sont ajoutées, celles retirées de YouTube passent en « retirées ». Tes tags sont conservés.
 
 ## Utilisation
 
-1. Ouvre l'app et suis la configuration guidée.
-2. Sur ordinateur, depuis l'onglet **Import**, glisse le favori « ⤓ Export Plus Tard » dans ta barre de favoris, ouvre ta playlist « À regarder plus tard » et clique dessus. Importe ensuite le fichier téléchargé.
-3. *(Conseillé)* Demande ton historique sur [takeout.google.com](https://takeout.google.com) : seulement « YouTube et YouTube Music », historique au format **JSON**. Importe `watch-history.json` quand l'archive arrive.
-4. Connecte-toi avec Google pour récupérer les infos détaillées des vidéos (environ 1 unité de quota pour 50 vidéos, donc ~64 unités pour 3 200 vidéos, sur 10 000 gratuites par jour).
-5. Regarde ! Les vidéos vues ou retirées s'accumulent dans **À retirer** ; de temps en temps, sur ordinateur, copie la liste et lance le favori « ✕ Purge Plus Tard ».
-6. Réimporte ta liste quand tu veux : les nouvelles vidéos sont ajoutées, et celles qui ont disparu de YouTube sont marquées comme retirées.
+1. Ouvre l'app, connecte-toi avec Google et suis la configuration guidée.
+2. Installe Tampermonkey (ordinateur) ou Userscripts (iPhone), puis le **Script Companion** depuis l'onglet **Import**.
+3. Touche **Synchroniser**, puis « Envoyer à Companion » dans le panneau qui apparaît sur YouTube.
+4. *(Conseillé)* Demande ton historique sur [takeout.google.com](https://takeout.google.com) : seulement « YouTube et YouTube Music », historique au format **JSON**. Importe `watch-history.json` quand l'archive arrive.
+5. Les infos détaillées des vidéos sont récupérées via l'API officielle (environ 1 unité de quota pour 50 vidéos, donc ~64 unités pour 3 200 vidéos, sur 10 000 gratuites par jour).
+6. Regarde ! Les vidéos vues ou retirées s'accumulent dans **À retirer**. Elles disparaissent de YouTube à la prochaine synchro.
 
 ## Héberger sa propre copie
 
@@ -71,8 +79,9 @@ Aucune dépendance : un simple serveur statique suffit.
 
 ```bash
 npm run serve        # http://localhost:8080
-npm test             # tests unitaires (imports, tags)
-node tests/e2e.mjs   # test navigateur avec Playwright (YouTube simulé)
+npm test                  # tests unitaires (imports, tags)
+node tests/e2e.mjs        # test navigateur avec Playwright (YouTube simulé)
+node tests/e2e-sync.mjs   # test du script de synchro sur un faux youtube.com
 ```
 
 Structure :
@@ -86,12 +95,13 @@ js/tagger.js          règles de tags, pertinence, similarité
 js/importers.js       lecture des fichiers (JSON favori, CSV Takeout, historique)
 js/google.js          connexion Google, YouTube Data API, synchro Drive
 js/player.js          lecteur YouTube intégré (vitesse, progression)
-js/bookmarklets.js    scripts Export / Purge lancés sur youtube.com
+js/bookmarklets.js    favoris Export / Purge (méthode de secours)
+companion.user.js     script de synchro à installer dans Tampermonkey / Userscripts
 js/store.js           état + IndexedDB
 sw.js                 cache hors ligne
 ```
 
-Le favori de purge utilise l'API interne de youtube.com (`edit_playlist`), qui n'est pas documentée. S'il cesse de fonctionner après une mise à jour de YouTube, c'est ce fichier qu'il faut adapter.
+Le script et le favori de purge utilisent l'API interne de youtube.com (`browse` et `browse/edit_playlist`), qui n'est pas documentée. S'ils cessent de fonctionner après une mise à jour de YouTube, c'est `companion.user.js` qu'il faut adapter.
 
 ## Licence
 

@@ -22,6 +22,7 @@ export function importWatchLater(items) {
         id: it.id,
         title: it.title || '',
         channelTitle: it.channelTitle || '',
+        channelId: it.channelId || undefined,
         channelUrl: it.channelUrl || '',
         duration: it.duration ?? null,
         addedAt: it.addedAt || null,
@@ -37,6 +38,7 @@ export function importWatchLater(items) {
       v.position = it.position;
       if (it.title && !v.enriched) v.title = it.title;
       if (it.channelTitle && !v.channelTitle) v.channelTitle = it.channelTitle;
+      if (it.channelId && !v.channelId) v.channelId = it.channelId;
       if (v.duration == null && it.duration != null) v.duration = it.duration;
       if (it.addedAt && !v.addedAt) v.addedAt = it.addedAt;
       if (v.status === 'gone' || v.status === 'removed') v.status = 'active';

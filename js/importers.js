@@ -34,6 +34,7 @@ export function parseWatchLater(text, fileName = '') {
           id: i.id,
           title: i.title || '',
           channelTitle: i.channelTitle || '',
+          channelId: /^UC[\w-]{22}$/.test(i.channelId || '') ? i.channelId : '',
           channelUrl: i.channelUrl || '',
           duration: i.duration ?? parseDurationText(i.durationText),
           position: i.index ?? idx,
