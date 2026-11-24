@@ -1,7 +1,7 @@
 // Opérations sur l'état : imports, enrichissement, file de retrait.
 import { store } from './store.js';
-import { compileRules, historyAffinity, normalizeText } from './tagger.js';
-import { fetchVideos, fetchSubscriptions } from './google.js';
+import { compileRules, historyAffinity, normalizeText, viewMinutes } from './tagger.js';
+import { fetchVideos, fetchSubscriptions, fetchDurations } from './google.js';
 
 const S = () => store.state;
 
@@ -60,26 +60,24 @@ export function importHistory(entries) {
   const st = S();
   const counts = {};
   const watched = new Set();
-  // « Maintenant » = date du visionnage le plus récent de l'export (un export de la semaine
-  // dernière reste pertinent). Sans dates (export HTML), tout compte comme récent.
-  const ref = entries.reduce((m, e) => Math.max(m, e.time || 0), 0);
-  const days = st.settings.recentDays || 90;
-  const HALF_LIFE = 45 * 864e5;
+  // Sans dates (export HTML), on considère l'historique comme d'aujourd'hui.
+  const fallbackDay = Math.floor(Date.now() / 864e5);
   for (const e of entries) {
     watched.add(e.id);
     const key = e.channelId || 'name:' + normalizeText(e.channelTitle);
     if (!e.channelTitle && !e.channelId) continue;
-    const c = counts[key] || (counts[key] = { title: e.channelTitle, views: 0, lastView: 0, recent: 0, heat: 0 });
+    const c = counts[key] || (counts[key] = { title: e.channelTitle, views: 0, lastView: 0, times: [] });
     c.views++;
     if (e.time > c.lastView) c.lastView = e.time;
-    const age = ref && e.time ? ref - e.time : 0;
-    if (age <= days * 864e5) c.recent++;
-    c.heat += Math.pow(0.5, age / HALF_LIFE);
+    // [jour, minutes (inconnues pour l'instant), id de la vidéo pour aller chercher sa durée]
+    c.times.push([e.time ? Math.floor(e.time / 864e5) : fallbackDay, null, e.id]);
   }
-  for (const c of Object.values(st.channels)) { c.views = 0; c.lastView = 0; c.recent = 0; c.heat = 0; }
+  for (const c of Object.values(st.channels)) { c.views = 0; c.lastView = 0; c.times = []; delete c.recent; delete c.heat; }
   for (const [key, c] of Object.entries(counts)) {
     const prev = st.channels[key] || {};
-    st.channels[key] = { ...prev, title: c.title || prev.title, views: c.views, lastView: c.lastView, recent: c.recent, heat: Math.round(c.heat * 100) / 100 };
+    // On garde les 60 visionnages les plus récents : largement assez pour la « chaleur ».
+    const times = c.times.sort((a, b) => b[0] - a[0]).slice(0, 60);
+    st.channels[key] = { ...prev, title: c.title || prev.title, views: c.views, lastView: c.lastView, times };
   }
   st.history = {
     importedAt: Date.now(),
@@ -89,6 +87,40 @@ export function importHistory(entries) {
   };
   store.changed('history');
   return { entries: entries.length, channels: Object.keys(counts).length, unique: watched.size };
+}
+
+// Durées des vidéos de l'historique (1 unité de quota par paquet de 50) : seulement la dernière
+// année, au-delà la pondération temporelle les rend négligeables.
+export function historyDurationsTodo() {
+  const minDay = Math.floor(Date.now() / 864e5) - 400;
+  const ids = new Set();
+  for (const c of Object.values(S().channels)) {
+    for (const t of c.times || []) if (Array.isArray(t) && t[1] == null && t[2] && t[0] >= minDay) ids.add(t[2]);
+  }
+  return [...ids];
+}
+
+export async function weightHistoryByDuration(onProgress) {
+  const ids = historyDurationsTodo().slice(0, 25000);
+  if (!ids.length) return { done: 0 };
+  const asked = new Set(ids);
+  const known = {};
+  for (const v of Object.values(S().videos)) if (v.duration != null) known[v.id] = v.duration;
+  const toFetch = ids.filter((id) => known[id] == null);
+  const fetched = toFetch.length ? await fetchDurations(toFetch, onProgress) : {};
+  Object.assign(known, fetched);
+  for (const c of Object.values(S().channels)) {
+    if (!Array.isArray(c.times)) continue;
+    c.times = c.times.map((t) => {
+      if (!Array.isArray(t) || t[1] != null) return t;
+      const sec = t[2] ? known[t[2]] : undefined;
+      if (sec == null && t[2] && asked.has(t[2])) return [t[0], viewMinutes(null)]; // supprimée / privée : 10 min
+      if (sec === undefined) return t; // trop ancienne, durée non demandée
+      return [t[0], Math.round(viewMinutes(sec) * 10) / 10];
+    });
+  }
+  store.changed('history');
+  return { done: ids.length };
 }
 
 export async function syncSubscriptions() {
@@ -132,6 +164,24 @@ export async function enrichVideos({ all = false, onProgress } = {}) {
   }
   store.changed('enrich');
   return { done: ids.length, missing };
+}
+
+// Une vidéo regardée dans l'app compte aussi : les niveaux de créateurs bougent sans réimporter l'historique.
+export function recordView(id) {
+  const st = S();
+  const v = st.videos[id];
+  if (!v) return;
+  const key = v.channelId || (v.channelTitle ? 'name:' + normalizeText(v.channelTitle) : null);
+  if (!key) return;
+  const c = st.channels[key] || (st.channels[key] = { title: v.channelTitle, views: 0, lastView: 0, times: [] });
+  if (!Array.isArray(c.times)) c.times = [];
+  c.views = (c.views || 0) + 1;
+  c.lastView = Date.now();
+  c.times.unshift([Math.floor(Date.now() / 864e5), Math.round(viewMinutes(v.duration) * 10) / 10]);
+  c.times = c.times.slice(0, 60);
+  st.history.watchedIds ||= [];
+  if (!st.history.watchedIds.includes(id)) st.history.watchedIds.push(id);
+  store.changed('view');
 }
 
 export function queueRemoval(id, reason = 'manuel') {

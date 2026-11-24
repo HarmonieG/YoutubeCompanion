@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseWatchLater, parseHistory, extractId, parseDurationText } from '../js/importers.js';
-import { buildContext, autoTags, containsKeyword, normalizeText, parseIsoDuration, matchRules, compileRules } from '../js/tagger.js';
+import { explain, buildContext, autoTags, containsKeyword, normalizeText, parseIsoDuration, matchRules, compileRules } from '../js/tagger.js';
 import { emptyState } from '../js/store.js';
 
 test('extractId', () => {
@@ -60,49 +60,108 @@ test('mots-clés avec frontières', () => {
   assert.ok(t.includes('Blender') && t.includes('Tuto'));
 });
 
+const DAY = 864e5;
+const today = Math.floor(Date.now() / DAY);
+const times = (n, daysAgo = 0, step = 3) => Array.from({ length: n }, (_, i) => today - daysAgo - i * step);
+
 test('tags auto : durée, créateur, déjà vue', () => {
   const s = emptyState();
-  s.channels = { UCfav: { title: 'Fav', views: 12, recent: 6, heat: 5, subscribed: true }, UCalien: { title: 'Alien', views: 0 } };
+  s.channels = { UCfav: { title: 'Fav', views: 12, times: times(6), subscribed: true }, UCalien: { title: 'Alien', views: 0 } };
   s.history.watchedIds = ['vvvvvvvvvvv']; s.history.total = 1;
   const ctx = buildContext(s);
   const a = autoTags({ id: 'vvvvvvvvvvv', title: 'Godot devlog', channelId: 'UCfav', duration: 200 }, ctx);
-  assert.ok(a.includes('Rapide') && a.includes('Créateur préféré') && a.includes('Déjà vue') && a.includes('Godot') && a.includes('Gamedev'));
+  assert.ok(a.includes('Rapide') && a.includes('Favori') && a.includes('Déjà vue') && a.includes('Godot') && a.includes('Gamedev'), a.join());
   const b = autoTags({ id: 'xxxxxxxxxxx', title: 'Long video essay', channelTitle: 'Inconnu', duration: 4000 }, ctx);
   assert.ok(b.includes('Très long') && b.includes('Alien') && b.includes('Analyse / essai'));
 });
 
-test('créateur préféré = vues récentes, pas seulement l\'abonnement', async () => {
+test('niveaux Favori > Aimé > Apprécié selon les vues récentes, et Perdu de vue', () => {
   const s = emptyState();
   s.history.total = 1;
+  s.settings.tierFav = 1; s.settings.tierLiked = 1; s.settings.tierAppr = 1;
   s.channels = {
-    UCold: { title: 'Ancien chouchou', views: 80, recent: 0, heat: 0.1, subscribed: true },
-    UCnew: { title: 'Découverte', views: 6, recent: 6, heat: 5.5, subscribed: false },
-    UCsub: { title: 'Abonné oublié', views: 1, recent: 0, heat: 0, subscribed: true },
+    UCa: { title: 'A', views: 20, times: times(20, 0, 2) },          // très regardée en ce moment
+    UCb: { title: 'B', views: 6, times: times(6, 0, 10) },           // régulièrement
+    UCc: { title: 'C', views: 2, times: times(2, 30, 20) },          // de temps en temps
+    UCold: { title: 'Old', views: 80, times: times(60, 300, 1), lastView: Date.now() - 300 * DAY, subscribed: true }, // plus vue depuis 10 mois
+    UCsub: { title: 'Sub', views: 0, times: [], subscribed: true },
   };
   const ctx = buildContext(s);
-  const tag = (ch) => autoTags({ id: 'x', title: 't', channelId: ch }, ctx).find((t) => ['Créateur préféré', 'Habitué', 'Abonné', 'Alien'].includes(t));
-  assert.equal(tag('UCold'), 'Habitué');
-  assert.equal(tag('UCnew'), 'Créateur préféré');
+  const tag = (ch) => autoTags({ id: 'x', title: 't', channelId: ch }, ctx).find((t) => ['Favori', 'Aimé', 'Apprécié', 'Perdu de vue', 'Abonné', 'Alien'].includes(t));
+  assert.equal(tag('UCa'), 'Favori');
+  assert.equal(tag('UCb'), 'Aimé');
+  assert.equal(tag('UCc'), 'Apprécié');
+  assert.equal(tag('UCold'), 'Perdu de vue');
   assert.equal(tag('UCsub'), 'Abonné');
+  // Un favori épinglé à la main passe devant
+  s.settings.favChannels = ['UCc'];
+  assert.equal(autoTags({ id: 'x', title: 't', channelId: 'UCc' }, buildContext(s)).includes('Favori'), true);
 });
 
-test('historique : vues récentes et pondération par l\'ancienneté', async () => {
-  const { importHistory } = await import('../js/data.js');
+test('historique : dates de visionnage conservées, la temporalité compte', async () => {
+  const { importHistory, recordView } = await import('../js/data.js');
   const { store } = await import('../js/store.js');
-  const day = 864e5, now = Date.parse('2026-11-01');
-  const e = (ch, daysAgo) => ({ id: 'id' + Math.random().toString(36).slice(2, 11), title: 't', channelId: ch, channelTitle: ch, time: now - daysAgo * day });
-  const entries = [
-    ...Array.from({ length: 50 }, (_, i) => e('UCold', 400 + i)),   // beaucoup, mais il y a plus d'un an
+  const now = Date.now();
+  const e = (ch, daysAgo) => ({ id: 'id' + Math.random().toString(36).slice(2, 11), title: 't', channelId: ch, channelTitle: ch, time: now - daysAgo * DAY });
+  importHistory([
+    ...Array.from({ length: 50 }, (_, i) => e('UCold', 400 + i)),   // beaucoup, il y a plus d'un an
     ...Array.from({ length: 5 }, (_, i) => e('UCnew', i * 10)),      // peu, mais récemment
-  ];
-  importHistory(entries);
-  const ch = store.state.channels;
-  assert.equal(ch.UCold.views, 50);
-  assert.equal(ch.UCold.recent, 0);
-  assert.equal(ch.UCnew.recent, 5);
-  assert.ok(ch.UCnew.heat > ch.UCold.heat, 'les vues récentes pèsent plus');
-  const ctx = buildContext(store.state);
+  ]);
+  let ctx = buildContext(store.state);
+  assert.equal(ctx.stats.UCold.views, 50);
+  assert.equal(ctx.stats.UCold.recent, 0);
+  assert.equal(ctx.stats.UCnew.recentViews, 5);
+  assert.ok(ctx.stats.UCnew.heat > ctx.stats.UCold.heat);
   const tag = (c) => autoTags({ id: 'x', title: 't', channelId: c }, ctx);
-  assert.ok(tag('UCnew').includes('Créateur préféré'));
-  assert.ok(tag('UCold').includes('Habitué'));
+  assert.ok(tag('UCnew').includes('Favori'));
+  assert.ok(tag('UCold').includes('Perdu de vue'));
+  // Regarder une vidéo dans l'app réchauffe la chaîne
+  store.state.videos.zz = { id: 'zz', channelId: 'UCold', channelTitle: 'UCold', status: 'active' };
+  recordView('zz');
+  ctx = buildContext(store.state);
+  assert.equal(ctx.stats.UCold.recentViews, 1);
+  assert.ok(!autoTags({ id: 'x', title: 't', channelId: 'UCold' }, ctx).includes('Perdu de vue'));
+});
+
+test('le temps compte, pas le nombre : 20 Shorts < 3 vidéos longues', () => {
+  const s = emptyState();
+  s.history.total = 1;
+  s.settings.tierFav = 1; s.settings.tierLiked = 0; s.settings.tierAppr = 5;
+  s.channels = {
+    UCshorts: { title: 'Shorts', views: 20, times: Array.from({ length: 20 }, (_, i) => [today - i, 0.5]) },  // 20 × 30 s
+    UClong: { title: 'Long', views: 3, times: [[today - 2, 60], [today - 9, 60], [today - 20, 45]] },         // 3 longues vidéos
+  };
+  const ctx = buildContext(s);
+  assert.ok(ctx.stats.UClong.heat > ctx.stats.UCshorts.heat);
+  assert.ok(autoTags({ id: 'x', title: 't', channelId: 'UClong' }, ctx).includes('Favori'));
+  assert.ok(!autoTags({ id: 'x', title: 't', channelId: 'UCshorts' }, ctx).includes('Favori'));
+  const why = explain({ id: 'x', title: 't', channelId: 'UCshorts', channelTitle: 'Shorts' }, autoTags({ id: 'x', title: 't', channelId: 'UCshorts' }, ctx), ctx);
+  assert.ok(why.reasons.some((r) => /surtout des Shorts/.test(r.text)), JSON.stringify(why.reasons));
+});
+
+test('pondération de l\'historique par la durée (API simulée)', async () => {
+  const google = await import('../js/google.js');
+  const { importHistory, weightHistoryByDuration, historyDurationsTodo } = await import('../js/data.js');
+  const { store } = await import('../js/store.js');
+  importHistory([
+    { id: 'short000001', title: 's', channelId: 'UCs', channelTitle: 'S', time: Date.now() - DAY },
+    { id: 'longvid0001', title: 'l', channelId: 'UCl', channelTitle: 'L', time: Date.now() - DAY },
+    { id: 'gonevid0001', title: 'g', channelId: 'UCl', channelTitle: 'L', time: Date.now() - DAY },
+  ]);
+  assert.equal(historyDurationsTodo().length, 3);
+  void google;
+  // fetchDurations est appelé via google.js : on simule fetch
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ items: [
+    { id: 'short000001', contentDetails: { duration: 'PT45S' } },
+    { id: 'longvid0001', contentDetails: { duration: 'PT1H30M' } },
+  ] }) });
+  const mem = { 'yc-token': JSON.stringify({ access_token: 't', expires_at: Date.now() + 3600e3 }) };
+  globalThis.localStorage = { getItem: (k) => mem[k] ?? null, setItem: (k, v) => { mem[k] = v; }, removeItem: (k) => { delete mem[k]; } };
+  google.auth.restore();
+  await weightHistoryByDuration();
+  const ch = store.state.channels;
+  assert.deepEqual(ch.UCs.times[0].slice(1), [0.8]);
+  assert.ok(ch.UCl.times.some((t) => t[1] === 60), JSON.stringify(ch.UCl.times));   // plafonné à 60 min
+  assert.ok(ch.UCl.times.some((t) => t[1] === 10), JSON.stringify(ch.UCl.times));   // supprimée : 10 min par défaut
+  assert.equal(historyDurationsTodo().length, 0);
 });

@@ -1,14 +1,14 @@
 import { store } from './store.js';
 import { GOOGLE_CLIENT_ID } from './config.js';
 import {
-  GROUPS, DEFAULT_RULES, buildContext, videoTags, autoTags, groupOfTag, explain, similarity,
-  formatDuration, normalizeText, channelKey, channelOf,
+  GROUPS, DEFAULT_RULES, buildContext, videoTags, autoTags, groupOfTag, explain, similarity, creatorTag,
+  formatDuration, normalizeText, channelKey, channelOf, fmtMinutes,
 } from './tagger.js';
 import { buildShelves, buildSequence, matchesFilter } from './curation.js';
 import { parseWatchLater, parseHistory, readFileText } from './importers.js';
 import {
   importWatchLater, importHistory, syncSubscriptions, enrichVideos, queueRemoval, unqueue,
-  markPurged, setProgress, toggleManualTag, addManualTag, videosByStatus, rulesToText, textToRules,
+  markPurged, setProgress, toggleManualTag, recordView, weightHistoryByDuration, historyDurationsTodo, addManualTag, videosByStatus, rulesToText, textToRules,
 } from './data.js';
 import { auth, driveLoad, driveSave, fetchMyPlaylists, addToPlaylist, createPlaylist } from './google.js';
 import { Player } from './player.js';
@@ -547,7 +547,7 @@ function startPlayer(v) {
 }
 
 function onWatched(v, frac) {
-  if (v.status === 'active') queueRemoval(v.id, `vue à ${Math.round(frac * 100)} %`);
+  if (v.status === 'active') { recordView(v.id); queueRemoval(v.id, `vue à ${Math.round(frac * 100)} %`); }
   showEndSheet(v, false);
 }
 
@@ -761,10 +761,11 @@ function googleBlock() {
   const n = videosByStatus('active', 'queued').length;
   const todo = Object.values(st().videos).filter((v) => !v.enriched && v.status !== 'removed').length;
   const subs = Object.values(st().channels).filter((c) => c.subscribed).length;
-  return `<p>La connexion Google récupère la durée, les tags et la catégorie de chaque vidéo, ainsi que tes abonnements (pour « Créateur préféré » / « Abonné »).</p>
+  return `<p>La connexion Google récupère la durée, les tags et la catégorie de chaque vidéo, ainsi que tes abonnements (ils comptent pour « Abonné »).</p>
   <ul class="stats">
     <li>${n} vidéos dans ta liste, <b>${todo}</b> sans infos détaillées</li>
     <li>${subs} abonnements connus</li>
+    ${historyDurationsTodo().length ? `<li><b>${historyDurationsTodo().length}</b> vidéos de ton historique sans durée (pour compter le temps regardé plutôt que le nombre de vidéos)</li>` : ''}
   </ul>
   <div class="row">
     <button class="primary" data-act="enrich">${auth.signedIn ? 'Mettre à jour depuis YouTube' : 'Se connecter et récupérer les infos'}</button>
@@ -804,11 +805,33 @@ async function handleFile(kind, file) {
       if (!entries.length) throw new Error('aucun visionnage trouvé (as-tu choisi le format JSON ?)');
       const r = importHistory(entries);
       toast(`Historique : ${r.entries} visionnages, ${r.channels} chaînes`);
+      render();
+      weighHistory();
+      return;
     }
     render();
   } catch (e) {
     toast('Import impossible : ' + e.message);
   }
+}
+
+// Le temps regardé compte, pas le nombre de vidéos : on récupère la durée des vidéos de l'historique.
+let weighing = false;
+async function weighHistory(say) {
+  if (weighing || !historyDurationsTodo().length) return;
+  if (!auth.signedIn) { toast('Connecte-toi pour pondérer ton historique par la durée des vidéos.'); return; }
+  weighing = true;
+  const n = historyDurationsTodo().length;
+  const info = (t) => (say ? say(t) : null);
+  if (!say) toast(`Récupération de la durée de ${n} vidéos de ton historique…`);
+  try {
+    await weightHistoryByDuration((d, t) => info(`Durées de l'historique : ${d} / ${t}`));
+    ctx = null;
+    toast('Historique pondéré par le temps de visionnage');
+    render();
+  } catch (e) {
+    toast('Durées de l\'historique : ' + e.message);
+  } finally { weighing = false; }
 }
 
 async function runEnrich(all = false) {
@@ -820,6 +843,7 @@ async function runEnrich(all = false) {
     const subs = await syncSubscriptions();
     const r = await enrichVideos({ all, onProgress: (d, t) => say(`Infos vidéos : ${d} / ${t}`) });
     toast(`${subs} abonnements, ${r.done} vidéos mises à jour${r.missing ? `, ${r.missing} indisponibles` : ''}`);
+    if (historyDurationsTodo().length) await weighHistory(say);
     render();
   } catch (e) {
     say('Erreur : ' + esc(e.message));
@@ -829,10 +853,21 @@ async function runEnrich(all = false) {
 
 // ---------------------------------------------------------------- réglages
 function topChannels(n = 30) {
+  const c = getCtx();
   return Object.entries(st().channels)
-    .filter(([, c]) => c.views || c.subscribed)
-    .sort((a, b) => (b[1].heat ?? b[1].views ?? 0) - (a[1].heat ?? a[1].views ?? 0) || (b[1].views || 0) - (a[1].views || 0))
+    .filter(([k, ch]) => c.stats[k]?.views || ch.subscribed)
+    .sort((a, b) => c.stats[b[0]].heat - c.stats[a[0]].heat || c.stats[b[0]].views - c.stats[a[0]].views)
     .slice(0, n);
+}
+
+const TIER_ICON = { 'Favori': '❤️', 'Aimé': '💛', 'Apprécié': '👍', 'Perdu de vue': '🕰️' };
+function channelTier(k) {
+  const c = getCtx();
+  return c.tiers[k] || creatorTagFor(k);
+}
+function creatorTagFor(k) {
+  const ch = st().channels[k];
+  return creatorTag({ id: '', channelId: k.startsWith('name:') ? undefined : k, channelTitle: ch?.title || '' }, getCtx());
 }
 
 function renderSettings() {
@@ -851,8 +886,10 @@ function renderSettings() {
     <h2>Règles automatiques</h2>
     <div class="fields">
       ${numField('quickMax', 'Vidéo « Rapide » jusqu\'à (minutes)', s.quickMax / 60)}
-      ${numField('favRecentViews', '« Créateur préféré » : vidéos vues ces 3 derniers mois, au moins', s.favRecentViews)}
-      ${numField('favMinViews', '« Habitué » : vidéos vues au total, au moins', s.favMinViews)}
+      ${numField('tierFav', '❤️ Favoris : nombre de créateurs', s.tierFav)}
+      ${numField('tierLiked', '💛 Aimés : nombre de créateurs', s.tierLiked)}
+      ${numField('tierAppr', '👍 Appréciés : nombre de créateurs', s.tierAppr)}
+      ${numField('lostDays', '🕰️ « Perdu de vue » après (jours sans le regarder)', s.lostDays)}
       ${numField('alienMaxViews', '« Alien » jusqu\'à (vues de la chaîne)', s.alienMaxViews)}
       ${numField('watchedThreshold', 'Retirer automatiquement après (% regardé)', Math.round(s.watchedThreshold * 100))}
       <label class="field">Vitesse par défaut
@@ -862,9 +899,9 @@ function renderSettings() {
   </section>
   <section class="panel">
     <h2>Créateurs</h2>
-    <p class="hint">★ = toujours préféré · ⊘ = jamais préféré. Classés selon ce que tu regardes ces derniers temps (les vues récentes comptent davantage).</p>
+    <p class="hint">❤️ Favori · 💛 Aimé · 👍 Apprécié · 🕰️ Perdu de vue. Classés selon le <b>temps</b> que tu passes sur chaque chaîne ces derniers temps (une minute d'il y a 45 jours compte moitié moins qu'une minute d'hier ; une vidéo compte au plus 1 h). ★ = toujours favori · ⊘ = jamais.</p>
     <div class="chans">${topChannels(40).map(([id, c]) => `<div class="chanrow" data-chan="${esc(id)}">
-      <span>${esc(c.title)} <small>${c.recent ?? 0} récemment · ${c.views || 0} au total${c.subscribed ? ' · abonné' : ''}</small></span>
+      <span>${TIER_ICON[channelTier(id)] || ''} ${esc(c.title)} <small>${fmtMinutes(getCtx().stats[id].recent)} ces 3 mois · ${c.views || 0} vidéos au total${c.subscribed ? ' · abonné' : ''}</small></span>
       <button class="ghost small ${fav.has(id) ? 'on' : ''}" data-act="fav">★</button>
       <button class="ghost small ${ban.has(id) ? 'on' : ''}" data-act="ban">⊘</button>
     </div>`).join('') || '<p class="hint">Importe ton historique pour voir tes créateurs.</p>'}</div>
@@ -966,13 +1003,13 @@ function renderTasteQuestions() {
     ${radio('q-quickMax', [[180, '3 min'], [300, '5 min'], [600, '10 min'], [900, '15 min']], s.quickMax)}
     <h4>On retire une vidéo de la liste quand tu en as vu…</h4>
     ${radio('q-watchedThreshold', [[0.7, '70 %'], [0.8, '80 %'], [0.9, '90 %'], [0.98, 'Toute la vidéo']], s.watchedThreshold)}
-    <h4>Un créateur est « préféré » quand tu as vu, ces 3 derniers mois, au moins…</h4>
-    ${radio('q-favRecentViews', [[2, '2 vidéos'], [4, '4 vidéos'], [8, '8 vidéos'], [15, '15 vidéos']], s.favRecentViews)}
-    <p class="hint">Abonné ou pas : c'est ce que tu regardes vraiment qui compte. Tu peux aussi en choisir à la main ci-dessous.</p>
+    <h4>Combien de créateurs ❤️ favoris ?</h4>
+    ${radio('q-tierFav', [[3, '3'], [5, '5'], [8, '8'], [12, '12']], s.tierFav)}
+    <p class="hint">Ce sont ceux que tu regardes le plus <b>ces derniers temps</b>, abonné ou pas. Viennent ensuite 💛 Aimés et 👍 Appréciés. Le classement bouge tout seul avec ce que tu regardes. Tu peux aussi épingler des favoris à la main ci-dessous.</p>
     <h4>Ce qui t'intéresse le plus en ce moment <small>(mis en avant dans « Pour moi »)</small></h4>
     <div class="tags">${themes.map(([t, n]) => `<button class="chip g-${groupOfTag(t, c)} ${interests.has(t) ? 'on' : ''}" data-act="interest" data-tag="${esc(t)}">${esc(t)} <i>${n}</i></button>`).join('') || '<p class="hint">Les thèmes apparaîtront après l\'import de ta liste.</p>'}</div>
     <h4>Tes créateurs préférés</h4>
-    <div class="tags">${topChannels(20).map(([id, ch]) => `<button class="chip g-createur ${fav.has(id) ? 'on' : ''}" data-act="favchip" data-chan="${esc(id)}">${esc(ch.title)} <i>${ch.recent ?? ch.views ?? 0}</i></button>`).join('') || '<p class="hint">Importe ton historique pour avoir des suggestions.</p>'}</div>
+    <div class="tags">${topChannels(20).map(([id, ch]) => `<button class="chip g-createur ${fav.has(id) ? 'on' : ''}" data-act="favchip" data-chan="${esc(id)}">${TIER_ICON[channelTier(id)] || ''} ${esc(ch.title)} <i>${fmtMinutes(getCtx().stats[id].recent)}</i></button>`).join('') || '<p class="hint">Importe ton historique pour avoir des suggestions.</p>'}</div>
     <p class="hint">Tout se modifie ensuite dans Réglages, y compris les mots-clés de chaque thème.</p>`;
 }
 

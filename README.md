@@ -10,12 +10,12 @@ Statique (HTML/CSS/JS sans build), hébergée sur GitHub Pages. Tes données res
 
 ## Fonctionnalités
 
-- **Accueil = curation automatique**, présentée en rayons : À reprendre, un rayon selon l'heure (Pour le café, Pause déj, Pour la soirée…), Pour toi, Vite vu, Tes créateurs préférés, Tes habitués, tes thèmes (Godot, Figurines…), Les Aliens, Apprendre, À méditer, Détente, Fraîchement publiées, Déjà vues ? (à vider d'un geste)
+- **Accueil = curation automatique**, présentée en rayons : À reprendre, un rayon selon l'heure (Pour le café, Pause déj, Pour la soirée…), Pour toi, Vite vu, ❤️ Tes favoris, 💛 Ceux que tu aimes, 👍 Ceux que tu apprécies, 🕰️ Perdus de vue, tes thèmes (Godot, Figurines…), Les Aliens, Apprendre, À méditer, Détente, Fraîchement publiées, Déjà vues ? (à vider d'un geste)
 - **Liste = enchaînement** : « J'ai 15 min / 30 min / 1 h / 2 h » compose une session de vidéos variées (jamais deux fois la même chaîne d'affilée), lue à la suite avec un compte à rebours entre deux vidéos
 - **ⓘ Pourquoi cette vidéo ?** sur chaque vignette : le détail des **+** et des **−** qui la font remonter (créateur, thèmes habituels, centres d'intérêt, déjà vue…), avec des boutons **+ / −** pour en demander plus ou moins (par thème ou par chaîne)
 - **Tags automatiques**
   - *Durée* : Short, Rapide (moins de 5 min, réglable), Court, Moyen, Long, Très long
-  - *Créateur* : **Créateur préféré** (au moins 4 vidéos vues ces 3 derniers mois, abonné ou pas, ou choisi à la main), **Habitué** (beaucoup regardé, mais pas récemment), **Abonné** (abonné mais peu regardé), **Alien** (chaîne jamais regardée). Les vues récentes pèsent plus dans le score (demi-vie de 45 jours).
+  - *Créateur* : niveaux qui évoluent avec ce que tu regardes — **❤️ Favori** (ton top 5 du moment), **💛 Aimé** (les 15 suivants), **👍 Apprécié** (les 30 suivants), **🕰️ Perdu de vue** (beaucoup regardé autrefois, plus rien depuis 4 mois), **Abonné**, **👽 Alien** (jamais regardé). Le classement se fait au **temps de visionnage** (20 Shorts ne valent pas 20 vidéos d'1 h 30 ; une vidéo compte au plus 1 h), pondéré par l'ancienneté (une minute d'il y a 45 jours compte moitié moins qu'une minute d'hier). Les vidéos regardées dans Companion comptent aussi.
   - *Statut* : Déjà vue (présente dans l'historique), Commencée, Indisponible, Récente
   - *Logiciel, Techno, Sujet, Format/mood* : règles par mots-clés (Blender, Godot, Unity, IA, Raspberry Pi, pixel art, figurines, tuto, video essay, ASMR…), entièrement modifiables dans Réglages
   - *Catégorie YouTube*

@@ -126,6 +126,17 @@ export async function fetchVideos(ids, onProgress) {
   return out;
 }
 
+export async function fetchDurations(ids, onProgress) {
+  const out = {};
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const r = await ytGet('videos', { part: 'contentDetails', id: chunk.join(','), maxResults: 50, fields: 'items(id,contentDetails/duration)' });
+    for (const it of r.items || []) out[it.id] = parseIsoDuration(it.contentDetails?.duration);
+    onProgress?.(Math.min(ids.length, i + 50), ids.length);
+  }
+  return out;
+}
+
 export async function fetchSubscriptions() {
   const out = {};
   let pageToken = '';

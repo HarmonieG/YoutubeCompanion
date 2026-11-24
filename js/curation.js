@@ -55,8 +55,9 @@ export function buildShelves(items, { interests = [], ctx, helpers, now = new Da
   push(c, [c.filter], 'score');
   push({ id: 'foryou', icon: '✨', title: 'Pour toi', why: 'Les mieux notées d\'après tes créateurs, tes thèmes et tes réglages. Touche ⓘ sur une vidéo pour voir le détail.' }, [], 'score');
   push({ id: 'quick', icon: '⚡', title: 'Vite vu', why: 'Moins de 5 minutes : de quoi vider la liste rapidement.' }, [tag('Rapide')], 'score');
-  push({ id: 'fav', icon: '❤️', title: 'Tes créateurs préférés', why: 'Les chaînes que tu regardes le plus ces 3 derniers mois, abonné ou pas.' }, [tag('Créateur préféré')], 'score', 2);
-  push({ id: 'habit', icon: '🔁', title: 'Tes habitués', why: 'Des chaînes que tu as beaucoup regardées, mais moins ces derniers temps.' }, [tag('Habitué')], 'score');
+  push({ id: 'fav', icon: '❤️', title: 'Tes favoris', why: 'Les créateurs que tu regardes le plus en ce moment.' }, [tag('Favori')], 'score', 1);
+  push({ id: 'liked', icon: '💛', title: 'Ceux que tu aimes', why: 'Juste derrière tes favoris : des créateurs que tu suis régulièrement.' }, [tag('Aimé')], 'score', 2);
+  push({ id: 'appr', icon: '👍', title: 'Ceux que tu apprécies', why: 'Des créateurs que tu regardes de temps en temps.' }, [tag('Apprécié')], 'score');
 
   // Thèmes : centres d'intérêt d'abord, puis les plus présents dans la liste.
   const counts = {};
@@ -69,6 +70,7 @@ export function buildShelves(items, { interests = [], ctx, helpers, now = new Da
     push({ id: 'theme:' + t, icon: THEME_ICONS[t] || THEME_ICONS[groupOfTag(t, ctx)] || '🏷️', title: t, why: interests.includes(t) ? `Un de tes centres d'intérêt (${counts[t]} vidéos).` : `Un des thèmes les plus présents dans ta liste (${counts[t]} vidéos).` }, [tag(t)], 'score');
   }
 
+  push({ id: 'lost', icon: '🕰️', title: 'Perdus de vue', why: 'Des créateurs que tu regardais beaucoup, mais plus depuis des mois. Laisse-leur une chance de revenir ! La sélection change chaque jour.' }, [tag('Perdu de vue')], 'shuffle', 2);
   push({ id: 'aliens', icon: '👽', title: 'Les Aliens', why: 'Des chaînes que tu n\'as jamais regardées. La sélection change chaque jour.' }, [tag('Alien')], 'shuffle');
   push({ id: 'learn', icon: '🎓', title: 'Apprendre', why: 'Tutos et cours.' }, [tag('Tuto')], 'score');
   push({ id: 'think', icon: '🧠', title: 'À méditer', why: 'Analyses, video essays et documentaires.' }, [tag('Analyse / essai')], 'score');
@@ -76,7 +78,10 @@ export function buildShelves(items, { interests = [], ctx, helpers, now = new Da
   push({ id: 'new', icon: '🆕', title: 'Fraîchement publiées', why: 'Publiées il y a moins d\'un mois.' }, [tag('Récente')], 'published', 2);
   push({ id: 'seen', icon: '🧹', title: 'Déjà vues ?', why: 'Ces vidéos apparaissent dans ton historique : tu peux sans doute les retirer.', cleanup: true }, [tag('Déjà vue')], 'score', 1);
   push({ id: 'gone', icon: '🚫', title: 'Indisponibles', why: 'Supprimées ou devenues privées : à retirer.', cleanup: true }, [tag('Indisponible')], 'score', 1);
-  return shelves;
+  // Ordre d'affichage : les favoris passent devant, les thèmes s'intercalent.
+  const ORDER = ['resume', 'ctx', 'fav', 'foryou', 'liked', 'quick', 'theme', 'lost', 'appr', 'aliens', 'learn', 'think', 'chill', 'new', 'seen', 'gone'];
+  const rank = (sh) => ORDER.indexOf(sh.id.startsWith('theme:') ? 'theme' : sh.id);
+  return shelves.map((sh, i) => [sh, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([sh]) => sh);
 }
 
 // Mélange stable sur la journée (même ordre tant qu'on ne change pas de jour).

@@ -14,7 +14,7 @@ export const GROUPS = [
 
 export const FIXED_TAGS = {
   'Short': 'duree', 'Rapide': 'duree', 'Court': 'duree', 'Moyen': 'duree', 'Long': 'duree', 'Très long': 'duree',
-  'Créateur préféré': 'createur', 'Abonné': 'createur', 'Habitué': 'createur', 'Alien': 'createur',
+  'Favori': 'createur', 'Aimé': 'createur', 'Apprécié': 'createur', 'Perdu de vue': 'createur', 'Abonné': 'createur', 'Alien': 'createur',
   'Déjà vue': 'statut', 'Commencée': 'statut', 'Indisponible': 'statut', 'Récente': 'statut', 'Vieille de la liste': 'statut',
 };
 
@@ -106,6 +106,76 @@ export function matchRules(text, compiled) {
 }
 
 // Contexte partagé pour le calcul des tags (à reconstruire quand l'état change).
+// ---------------------------------------------------------------- créateurs : niveaux qui évoluent
+export const RECENT_DAYS = 90;
+const HALF_LIFE_DAYS = 45;
+const DAY = 864e5;
+
+// Ce qu'on mesure : le TEMPS regardé, pas le nombre de vidéos (20 Shorts ≠ 20 vidéos d'1 h 30).
+// Chaque visionnage = [jour, minutes]. Durée inconnue = 10 min ; une vidéo compte au plus 60 min.
+export const DEFAULT_MINUTES = 10;
+export const MAX_MINUTES = 60;
+export const viewMinutes = (sec) => (sec == null ? DEFAULT_MINUTES : Math.max(0.5, Math.min(MAX_MINUTES, sec / 60)));
+
+// Stats d'une chaîne, recalculées à la volée à partir des dates : une minute regardée il y a
+// 45 jours compte moitié moins qu'une minute regardée aujourd'hui.
+export function channelStats(c, now = Date.now()) {
+  if (!c) return { views: 0, recentViews: 0, recent: 0, total: 0, heat: 0, lastView: 0, daysSince: Infinity };
+  const today = now / DAY;
+  let recentViews = 0, recent = 0, total = 0, heat = 0;
+  if (Array.isArray(c.times)) {
+    for (const t of c.times) {
+      const d = Array.isArray(t) ? t[0] : t;
+      const m = Array.isArray(t) && t[1] != null ? t[1] : DEFAULT_MINUTES;
+      const age = Math.max(0, today - d);
+      total += m;
+      if (age <= RECENT_DAYS) { recentViews++; recent += m; }
+      heat += (m / DEFAULT_MINUTES) * Math.pow(0.5, age / HALF_LIFE_DAYS);
+    }
+  } else { // données d'avant cette version
+    recentViews = c.recent ?? c.views ?? 0;
+    recent = recentViews * DEFAULT_MINUTES;
+    total = (c.views || 0) * DEFAULT_MINUTES;
+    heat = c.heat ?? c.views ?? 0;
+  }
+  const first = c.times?.[0];
+  const lastView = c.lastView || (first != null ? (Array.isArray(first) ? first[0] : first) * DAY : 0);
+  return { views: c.views || 0, recentViews, recent, total, heat, lastView, daysSince: lastView ? Math.floor((now - lastView) / DAY) : Infinity };
+}
+
+export function fmtMinutes(m) {
+  if (m < 1) return 'moins d\'1 min';
+  if (m < 60) return `${Math.round(m)} min`;
+  const h = Math.floor(m / 60), r = Math.round(m % 60);
+  return r ? `${h} h ${String(r).padStart(2, '0')}` : `${h} h`;
+}
+
+export const TIER_INFO = {
+  'Favori': { w: 5, icon: '❤️' },
+  'Aimé': { w: 3, icon: '💛' },
+  'Apprécié': { w: 1.5, icon: '👍' },
+};
+
+// Classement des chaînes par chaleur : les N premières sont Favori, puis Aimé, puis Apprécié.
+function computeTiers(state, stats, fav, banned) {
+  const s = state.settings;
+  const tiers = {};
+  for (const k of fav) tiers[k] = 'Favori';
+  const ranked = Object.keys(state.channels)
+    .filter((k) => !fav.has(k) && !banned.has(k) && stats[k].heat > 0.05)
+    .sort((a, b) => stats[b].heat - stats[a].heat);
+  let nFav = fav.size, nLiked = 0, nAppr = 0;
+  // recent = minutes regardées ces 3 derniers mois
+  for (const k of ranked) {
+    const { recent, heat } = stats[k];
+    if (nFav < s.tierFav && recent >= 20) { tiers[k] = 'Favori'; nFav++; }
+    else if (nLiked < s.tierLiked && recent >= 15) { tiers[k] = 'Aimé'; nLiked++; }
+    else if (nAppr < s.tierAppr && (recent >= 5 || heat >= 0.5)) { tiers[k] = 'Apprécié'; nAppr++; }
+    else break;
+  }
+  return tiers;
+}
+
 export function buildContext(state) {
   const compiled = compileRules(state.rules);
   const groupOf = { ...FIXED_TAGS };
@@ -115,14 +185,21 @@ export function buildContext(state) {
   for (const [id, c] of Object.entries(state.channels)) {
     if (c.title) nameIndex[normalizeText(c.title)] = id;
   }
+  const now = Date.now();
+  const stats = {};
+  for (const [k, c] of Object.entries(state.channels)) stats[k] = channelStats(c, now);
+  const fav = new Set(state.settings.favChannels || []);
+  const banned = new Set(state.settings.bannedChannels || []);
   return {
     state,
     compiled,
     groupOf,
     nameIndex,
+    stats,
+    tiers: computeTiers(state, stats, fav, banned),
     watched: new Set(state.history.watchedIds || []),
-    fav: new Set(state.settings.favChannels || []),
-    banned: new Set(state.settings.bannedChannels || []),
+    fav,
+    banned,
     interests: new Set(state.settings.interests || []),
   };
 }
@@ -143,13 +220,11 @@ export function creatorTag(video, ctx) {
   const key = channelKey(video, ctx);
   const c = channelOf(video, ctx);
   const views = c ? c.views || 0 : 0;
-  // Vues récentes ; anciennes données (avant cette règle) : on retombe sur le total.
-  const recent = c ? (c.recent ?? c.views ?? 0) : 0;
   if (key && ctx.banned.has(key)) return views <= s.alienMaxViews ? 'Alien' : null;
-  if (key && ctx.fav.has(key)) return 'Créateur préféré';
-  // Préféré = ce que tu regardes vraiment en ce moment, abonné ou pas.
-  if (recent >= s.favRecentViews) return 'Créateur préféré';
-  if (views >= s.favMinViews) return 'Habitué';
+  if (key && ctx.tiers[key]) return ctx.tiers[key];
+  // Perdu de vue : beaucoup regardé autrefois, plus rien depuis des mois.
+  const st = key ? ctx.stats[key] : null;
+  if (st && st.views >= s.lostMinViews && st.total >= 60 && st.recent === 0 && st.daysSince >= s.lostDays && st.daysSince !== Infinity) return 'Perdu de vue';
   if (c && c.subscribed) return 'Abonné';
   // « Alien » n'a de sens que si l'historique a été importé.
   if (ctx.state.history.total && views <= s.alienMaxViews) return 'Alien';
@@ -216,18 +291,20 @@ export function explain(video, tags, ctx) {
   const s = ctx.state.settings;
   const boosts = s.boosts || {};
   const c = channelOf(video, ctx);
-  const views = c ? c.views || 0 : 0;
-  const recent = c ? (c.recent ?? 0) : 0;
-  const heat = c ? (c.heat ?? 0) : 0;
+  const ck = channelKey(video, ctx);
+  const { views, recentViews, recent, total, heat, daysSince } = ck && ctx.stats[ck] ? ctx.stats[ck] : channelStats(c);
   const chanName = video.channelTitle || c?.title || 'cette chaîne';
-  const days = s.recentDays || 90;
-  const period = days % 30 === 0 ? `ces ${days / 30} derniers mois` : `ces ${days} derniers jours`;
+  const tier = tags.find((t) => TIER_INFO[t]);
 
-  if (tags.includes('Créateur préféré')) add(3, ctx.fav.has(channelKey(video, ctx)) ? 'Créateur préféré (choisi par toi)' : 'Un de tes créateurs préférés du moment');
-  // Ce qui compte le plus : ce que tu regardes ces derniers temps.
-  if (recent) add(Math.min(8, Math.log2(1 + heat) * 2.5), `Tu as regardé ${plural(recent, 'vidéo')} de ${chanName} ${period}`);
-  if (views > recent) add(Math.min(3, Math.log2(1 + views - recent) * 0.6), `${plural(views - recent, 'vidéo')} de ${chanName} vue${views - recent > 1 ? 's' : ''} plus tôt`);
-  if (c && c.subscribed) add(tags.includes('Créateur préféré') ? 0.5 : 1, recent ? 'Tu es abonné à cette chaîne' : 'Tu es abonné, mais tu ne l\'as pas regardée récemment');
+  if (tier === 'Favori') add(TIER_INFO.Favori.w, ctx.fav.has(ck) ? 'Favori (choisi par toi)' : `Un de tes ${s.tierFav} créateurs favoris du moment`);
+  if (tier === 'Aimé') add(TIER_INFO['Aimé'].w, `Un créateur que tu aimes (dans ton top ${s.tierFav + s.tierLiked} récent)`);
+  if (tier === 'Apprécié') add(TIER_INFO['Apprécié'].w, 'Un créateur que tu apprécies');
+  // Ce que tu regardes ces derniers temps compte le plus ; l'ancien un peu.
+  const shortsNote = (mins, n) => (n >= 3 && mins / n < 2 ? ', surtout des Shorts' : '');
+  if (recent) add(Math.min(5, Math.log2(1 + heat) * 1.8), `Tu as regardé ${fmtMinutes(recent)} de ${chanName} ces 3 derniers mois (${plural(recentViews, 'vidéo')}${shortsNote(recent, recentViews)})`);
+  if (views > recentViews && total > recent) add(Math.min(2, Math.log2(1 + (total - recent) / DEFAULT_MINUTES) * 0.4), `Et ${fmtMinutes(total - recent)} plus tôt (${plural(views - recentViews, 'vidéo')})`);
+  if (tags.includes('Perdu de vue')) add(1, `Tu ne l'as plus regardé depuis ${daysSince >= 60 ? Math.round(daysSince / 30) + ' mois' : daysSince + ' jours'} : une chance de revenir ?`);
+  if (c && c.subscribed) add(tier ? 0.5 : 1, recent ? 'Tu es abonné à cette chaîne' : 'Tu es abonné, mais tu ne l\'as pas regardée récemment');
   if (tags.includes('Alien')) add(0, 'Alien : une chaîne que tu n\'as jamais regardée');
 
   const aff = ctx.state.history.tagAffinity || {};
