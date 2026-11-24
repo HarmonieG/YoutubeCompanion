@@ -1,0 +1,11 @@
+{
+  "name": "youtube-companion",
+  "private": true,
+  "type": "module",
+  "description": "Trier et regarder sa playlist YouTube « À regarder plus tard » — app statique pour GitHub Pages",
+  "scripts": {
+    "test": "node --test tests/unit.test.mjs",
+    "serve": "python3 -m http.server 8080"
+  },
+  "license": "MIT"
+}
