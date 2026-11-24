@@ -831,7 +831,7 @@ async function runEnrich(all = false) {
 function topChannels(n = 30) {
   return Object.entries(st().channels)
     .filter(([, c]) => c.views || c.subscribed)
-    .sort((a, b) => (b[1].views || 0) - (a[1].views || 0))
+    .sort((a, b) => (b[1].heat ?? b[1].views ?? 0) - (a[1].heat ?? a[1].views ?? 0) || (b[1].views || 0) - (a[1].views || 0))
     .slice(0, n);
 }
 
@@ -851,7 +851,8 @@ function renderSettings() {
     <h2>Règles automatiques</h2>
     <div class="fields">
       ${numField('quickMax', 'Vidéo « Rapide » jusqu\'à (minutes)', s.quickMax / 60)}
-      ${numField('favMinViews', '« Préféré » / « Habitué » à partir de (vues dans l\'historique)', s.favMinViews)}
+      ${numField('favRecentViews', '« Créateur préféré » : vidéos vues ces 3 derniers mois, au moins', s.favRecentViews)}
+      ${numField('favMinViews', '« Habitué » : vidéos vues au total, au moins', s.favMinViews)}
       ${numField('alienMaxViews', '« Alien » jusqu\'à (vues de la chaîne)', s.alienMaxViews)}
       ${numField('watchedThreshold', 'Retirer automatiquement après (% regardé)', Math.round(s.watchedThreshold * 100))}
       <label class="field">Vitesse par défaut
@@ -861,9 +862,9 @@ function renderSettings() {
   </section>
   <section class="panel">
     <h2>Créateurs</h2>
-    <p class="hint">★ = toujours préféré · ⊘ = jamais préféré. Classés par nombre de vues dans ton historique.</p>
+    <p class="hint">★ = toujours préféré · ⊘ = jamais préféré. Classés selon ce que tu regardes ces derniers temps (les vues récentes comptent davantage).</p>
     <div class="chans">${topChannels(40).map(([id, c]) => `<div class="chanrow" data-chan="${esc(id)}">
-      <span>${esc(c.title)} <small>${c.views || 0} vues${c.subscribed ? ' · abonné' : ''}</small></span>
+      <span>${esc(c.title)} <small>${c.recent ?? 0} récemment · ${c.views || 0} au total${c.subscribed ? ' · abonné' : ''}</small></span>
       <button class="ghost small ${fav.has(id) ? 'on' : ''}" data-act="fav">★</button>
       <button class="ghost small ${ban.has(id) ? 'on' : ''}" data-act="ban">⊘</button>
     </div>`).join('') || '<p class="hint">Importe ton historique pour voir tes créateurs.</p>'}</div>
@@ -965,12 +966,13 @@ function renderTasteQuestions() {
     ${radio('q-quickMax', [[180, '3 min'], [300, '5 min'], [600, '10 min'], [900, '15 min']], s.quickMax)}
     <h4>On retire une vidéo de la liste quand tu en as vu…</h4>
     ${radio('q-watchedThreshold', [[0.7, '70 %'], [0.8, '80 %'], [0.9, '90 %'], [0.98, 'Toute la vidéo']], s.watchedThreshold)}
-    <h4>Un créateur devient « préféré » (si tu es abonné) ou « habitué » à partir de…</h4>
-    ${radio('q-favMinViews', [[3, '3 vidéos vues'], [5, '5 vidéos'], [10, '10 vidéos'], [20, '20 vidéos']], s.favMinViews)}
+    <h4>Un créateur est « préféré » quand tu as vu, ces 3 derniers mois, au moins…</h4>
+    ${radio('q-favRecentViews', [[2, '2 vidéos'], [4, '4 vidéos'], [8, '8 vidéos'], [15, '15 vidéos']], s.favRecentViews)}
+    <p class="hint">Abonné ou pas : c'est ce que tu regardes vraiment qui compte. Tu peux aussi en choisir à la main ci-dessous.</p>
     <h4>Ce qui t'intéresse le plus en ce moment <small>(mis en avant dans « Pour moi »)</small></h4>
     <div class="tags">${themes.map(([t, n]) => `<button class="chip g-${groupOfTag(t, c)} ${interests.has(t) ? 'on' : ''}" data-act="interest" data-tag="${esc(t)}">${esc(t)} <i>${n}</i></button>`).join('') || '<p class="hint">Les thèmes apparaîtront après l\'import de ta liste.</p>'}</div>
     <h4>Tes créateurs préférés</h4>
-    <div class="tags">${topChannels(20).map(([id, ch]) => `<button class="chip g-createur ${fav.has(id) ? 'on' : ''}" data-act="favchip" data-chan="${esc(id)}">${esc(ch.title)} <i>${ch.views || 0}</i></button>`).join('') || '<p class="hint">Importe ton historique pour avoir des suggestions.</p>'}</div>
+    <div class="tags">${topChannels(20).map(([id, ch]) => `<button class="chip g-createur ${fav.has(id) ? 'on' : ''}" data-act="favchip" data-chan="${esc(id)}">${esc(ch.title)} <i>${ch.recent ?? ch.views ?? 0}</i></button>`).join('') || '<p class="hint">Importe ton historique pour avoir des suggestions.</p>'}</div>
     <p class="hint">Tout se modifie ensuite dans Réglages, y compris les mots-clés de chaque thème.</p>`;
 }
 

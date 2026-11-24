@@ -6,7 +6,9 @@ const KEY = 'state';
 export const DEFAULT_SETTINGS = {
   clientId: '',
   quickMax: 300,          // secondes : en dessous = « Rapide »
-  favMinViews: 5,         // vues dans l'historique pour devenir « Préféré » / « Habitué »
+  favRecentViews: 4,      // vidéos vues sur la période récente pour être « Créateur préféré »
+  recentDays: 90,         // durée de la période récente (jours)
+  favMinViews: 10,        // vues au total pour être « Habitué » (sans être regardé récemment)
   alienMaxViews: 0,       // vues max pour être un « Alien »
   watchedThreshold: 0.8,  // part regardée qui déclenche le retrait
   favChannels: [],        // ids de chaînes ajoutées à la main

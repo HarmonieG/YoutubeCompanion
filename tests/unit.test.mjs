@@ -62,11 +62,47 @@ test('mots-clés avec frontières', () => {
 
 test('tags auto : durée, créateur, déjà vue', () => {
   const s = emptyState();
-  s.channels = { UCfav: { title: 'Fav', views: 12, subscribed: true }, UCalien: { title: 'Alien', views: 0 } };
+  s.channels = { UCfav: { title: 'Fav', views: 12, recent: 6, heat: 5, subscribed: true }, UCalien: { title: 'Alien', views: 0 } };
   s.history.watchedIds = ['vvvvvvvvvvv']; s.history.total = 1;
   const ctx = buildContext(s);
   const a = autoTags({ id: 'vvvvvvvvvvv', title: 'Godot devlog', channelId: 'UCfav', duration: 200 }, ctx);
   assert.ok(a.includes('Rapide') && a.includes('Créateur préféré') && a.includes('Déjà vue') && a.includes('Godot') && a.includes('Gamedev'));
   const b = autoTags({ id: 'xxxxxxxxxxx', title: 'Long video essay', channelTitle: 'Inconnu', duration: 4000 }, ctx);
   assert.ok(b.includes('Très long') && b.includes('Alien') && b.includes('Analyse / essai'));
+});
+
+test('créateur préféré = vues récentes, pas seulement l\'abonnement', async () => {
+  const s = emptyState();
+  s.history.total = 1;
+  s.channels = {
+    UCold: { title: 'Ancien chouchou', views: 80, recent: 0, heat: 0.1, subscribed: true },
+    UCnew: { title: 'Découverte', views: 6, recent: 6, heat: 5.5, subscribed: false },
+    UCsub: { title: 'Abonné oublié', views: 1, recent: 0, heat: 0, subscribed: true },
+  };
+  const ctx = buildContext(s);
+  const tag = (ch) => autoTags({ id: 'x', title: 't', channelId: ch }, ctx).find((t) => ['Créateur préféré', 'Habitué', 'Abonné', 'Alien'].includes(t));
+  assert.equal(tag('UCold'), 'Habitué');
+  assert.equal(tag('UCnew'), 'Créateur préféré');
+  assert.equal(tag('UCsub'), 'Abonné');
+});
+
+test('historique : vues récentes et pondération par l\'ancienneté', async () => {
+  const { importHistory } = await import('../js/data.js');
+  const { store } = await import('../js/store.js');
+  const day = 864e5, now = Date.parse('2026-11-01');
+  const e = (ch, daysAgo) => ({ id: 'id' + Math.random().toString(36).slice(2, 11), title: 't', channelId: ch, channelTitle: ch, time: now - daysAgo * day });
+  const entries = [
+    ...Array.from({ length: 50 }, (_, i) => e('UCold', 400 + i)),   // beaucoup, mais il y a plus d'un an
+    ...Array.from({ length: 5 }, (_, i) => e('UCnew', i * 10)),      // peu, mais récemment
+  ];
+  importHistory(entries);
+  const ch = store.state.channels;
+  assert.equal(ch.UCold.views, 50);
+  assert.equal(ch.UCold.recent, 0);
+  assert.equal(ch.UCnew.recent, 5);
+  assert.ok(ch.UCnew.heat > ch.UCold.heat, 'les vues récentes pèsent plus');
+  const ctx = buildContext(store.state);
+  const tag = (c) => autoTags({ id: 'x', title: 't', channelId: c }, ctx);
+  assert.ok(tag('UCnew').includes('Créateur préféré'));
+  assert.ok(tag('UCold').includes('Habitué'));
 });

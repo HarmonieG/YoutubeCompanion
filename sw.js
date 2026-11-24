@@ -1,5 +1,5 @@
 // Service worker minimal : l'app reste ouvrable hors connexion (réseau d'abord, cache en secours).
-const CACHE = 'yc-v4';
+const CACHE = 'yc-v5';
 const SHELL = ['./', 'index.html', 'css/app.css', 'icon.svg', 'manifest.webmanifest',
   'js/app.js', 'js/store.js', 'js/tagger.js', 'js/importers.js', 'js/data.js', 'js/google.js',
   'js/player.js', 'js/bookmarklets.js', 'js/config.js', 'js/curation.js'];

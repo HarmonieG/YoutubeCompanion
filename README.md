@@ -15,7 +15,7 @@ Statique (HTML/CSS/JS sans build), hébergée sur GitHub Pages. Tes données res
 - **ⓘ Pourquoi cette vidéo ?** sur chaque vignette : le détail des **+** et des **−** qui la font remonter (créateur, thèmes habituels, centres d'intérêt, déjà vue…), avec des boutons **+ / −** pour en demander plus ou moins (par thème ou par chaîne)
 - **Tags automatiques**
   - *Durée* : Short, Rapide (moins de 5 min, réglable), Court, Moyen, Long, Très long
-  - *Créateur* : Créateur préféré (abonné et souvent regardé, ou choisi à la main), Abonné, Habitué, **Alien** (chaîne jamais regardée)
+  - *Créateur* : **Créateur préféré** (au moins 4 vidéos vues ces 3 derniers mois, abonné ou pas, ou choisi à la main), **Habitué** (beaucoup regardé, mais pas récemment), **Abonné** (abonné mais peu regardé), **Alien** (chaîne jamais regardée). Les vues récentes pèsent plus dans le score (demi-vie de 45 jours).
   - *Statut* : Déjà vue (présente dans l'historique), Commencée, Indisponible, Récente
   - *Logiciel, Techno, Sujet, Format/mood* : règles par mots-clés (Blender, Godot, Unity, IA, Raspberry Pi, pixel art, figurines, tuto, video essay, ASMR…), entièrement modifiables dans Réglages
   - *Catégorie YouTube*

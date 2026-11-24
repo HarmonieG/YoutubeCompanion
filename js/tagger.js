@@ -143,11 +143,14 @@ export function creatorTag(video, ctx) {
   const key = channelKey(video, ctx);
   const c = channelOf(video, ctx);
   const views = c ? c.views || 0 : 0;
+  // Vues récentes ; anciennes données (avant cette règle) : on retombe sur le total.
+  const recent = c ? (c.recent ?? c.views ?? 0) : 0;
   if (key && ctx.banned.has(key)) return views <= s.alienMaxViews ? 'Alien' : null;
   if (key && ctx.fav.has(key)) return 'Créateur préféré';
-  if (c && c.subscribed && views >= s.favMinViews) return 'Créateur préféré';
-  if (c && c.subscribed) return 'Abonné';
+  // Préféré = ce que tu regardes vraiment en ce moment, abonné ou pas.
+  if (recent >= s.favRecentViews) return 'Créateur préféré';
   if (views >= s.favMinViews) return 'Habitué';
+  if (c && c.subscribed) return 'Abonné';
   // « Alien » n'a de sens que si l'historique a été importé.
   if (ctx.state.history.total && views <= s.alienMaxViews) return 'Alien';
   return null;
@@ -214,11 +217,17 @@ export function explain(video, tags, ctx) {
   const boosts = s.boosts || {};
   const c = channelOf(video, ctx);
   const views = c ? c.views || 0 : 0;
+  const recent = c ? (c.recent ?? 0) : 0;
+  const heat = c ? (c.heat ?? 0) : 0;
   const chanName = video.channelTitle || c?.title || 'cette chaîne';
+  const days = s.recentDays || 90;
+  const period = days % 30 === 0 ? `ces ${days / 30} derniers mois` : `ces ${days} derniers jours`;
 
-  if (tags.includes('Créateur préféré')) add(4, 'Un de tes créateurs préférés');
-  else if (tags.includes('Abonné')) add(1.5, 'Tu es abonné à cette chaîne');
-  if (views) add(Math.log2(1 + views) * 1.5, `Tu as regardé ${plural(views, 'vidéo')} de ${chanName}`);
+  if (tags.includes('Créateur préféré')) add(3, ctx.fav.has(channelKey(video, ctx)) ? 'Créateur préféré (choisi par toi)' : 'Un de tes créateurs préférés du moment');
+  // Ce qui compte le plus : ce que tu regardes ces derniers temps.
+  if (recent) add(Math.min(8, Math.log2(1 + heat) * 2.5), `Tu as regardé ${plural(recent, 'vidéo')} de ${chanName} ${period}`);
+  if (views > recent) add(Math.min(3, Math.log2(1 + views - recent) * 0.6), `${plural(views - recent, 'vidéo')} de ${chanName} vue${views - recent > 1 ? 's' : ''} plus tôt`);
+  if (c && c.subscribed) add(tags.includes('Créateur préféré') ? 0.5 : 1, recent ? 'Tu es abonné à cette chaîne' : 'Tu es abonné, mais tu ne l\'as pas regardée récemment');
   if (tags.includes('Alien')) add(0, 'Alien : une chaîne que tu n\'as jamais regardée');
 
   const aff = ctx.state.history.tagAffinity || {};

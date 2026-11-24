@@ -55,8 +55,8 @@ export function buildShelves(items, { interests = [], ctx, helpers, now = new Da
   push(c, [c.filter], 'score');
   push({ id: 'foryou', icon: '✨', title: 'Pour toi', why: 'Les mieux notées d\'après tes créateurs, tes thèmes et tes réglages. Touche ⓘ sur une vidéo pour voir le détail.' }, [], 'score');
   push({ id: 'quick', icon: '⚡', title: 'Vite vu', why: 'Moins de 5 minutes : de quoi vider la liste rapidement.' }, [tag('Rapide')], 'score');
-  push({ id: 'fav', icon: '❤️', title: 'Tes créateurs préférés', why: 'Les chaînes auxquelles tu es abonné et que tu regardes souvent.' }, [tag('Créateur préféré')], 'score', 2);
-  push({ id: 'habit', icon: '🔁', title: 'Tes habitués', why: 'Des chaînes que tu regardes souvent sans y être abonné.' }, [tag('Habitué')], 'score');
+  push({ id: 'fav', icon: '❤️', title: 'Tes créateurs préférés', why: 'Les chaînes que tu regardes le plus ces 3 derniers mois, abonné ou pas.' }, [tag('Créateur préféré')], 'score', 2);
+  push({ id: 'habit', icon: '🔁', title: 'Tes habitués', why: 'Des chaînes que tu as beaucoup regardées, mais moins ces derniers temps.' }, [tag('Habitué')], 'score');
 
   // Thèmes : centres d'intérêt d'abord, puis les plus présents dans la liste.
   const counts = {};

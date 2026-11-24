@@ -60,18 +60,26 @@ export function importHistory(entries) {
   const st = S();
   const counts = {};
   const watched = new Set();
+  // « Maintenant » = date du visionnage le plus récent de l'export (un export de la semaine
+  // dernière reste pertinent). Sans dates (export HTML), tout compte comme récent.
+  const ref = entries.reduce((m, e) => Math.max(m, e.time || 0), 0);
+  const days = st.settings.recentDays || 90;
+  const HALF_LIFE = 45 * 864e5;
   for (const e of entries) {
     watched.add(e.id);
     const key = e.channelId || 'name:' + normalizeText(e.channelTitle);
     if (!e.channelTitle && !e.channelId) continue;
-    const c = counts[key] || (counts[key] = { title: e.channelTitle, views: 0, lastView: 0 });
+    const c = counts[key] || (counts[key] = { title: e.channelTitle, views: 0, lastView: 0, recent: 0, heat: 0 });
     c.views++;
     if (e.time > c.lastView) c.lastView = e.time;
+    const age = ref && e.time ? ref - e.time : 0;
+    if (age <= days * 864e5) c.recent++;
+    c.heat += Math.pow(0.5, age / HALF_LIFE);
   }
-  for (const c of Object.values(st.channels)) { c.views = 0; c.lastView = 0; }
+  for (const c of Object.values(st.channels)) { c.views = 0; c.lastView = 0; c.recent = 0; c.heat = 0; }
   for (const [key, c] of Object.entries(counts)) {
     const prev = st.channels[key] || {};
-    st.channels[key] = { ...prev, title: c.title || prev.title, views: c.views, lastView: c.lastView };
+    st.channels[key] = { ...prev, title: c.title || prev.title, views: c.views, lastView: c.lastView, recent: c.recent, heat: Math.round(c.heat * 100) / 100 };
   }
   st.history = {
     importedAt: Date.now(),
