@@ -12,7 +12,8 @@ export const DEFAULT_SETTINGS = {
   lostMinViews: 8,        // « Perdu de vue » : au moins N vidéos vues autrefois…
   lostDays: 120,          // … et plus rien depuis N jours
   alienMaxViews: 0,       // vues max pour être un « Alien »
-  watchedThreshold: 0.8,  // part regardée qui déclenche le retrait
+  watchedThreshold: 0.8,  // part regardée qui déclenche le retrait automatique en fin de lecture
+  seenThreshold: 0.5,     // part regardée à partir de laquelle une vidéo compte comme « Déjà vue »
   favChannels: [],        // ids de chaînes ajoutées à la main
   bannedChannels: [],     // chaînes marquées « jamais préféré »
   interests: [],          // tags mis en avant (boost de pertinence)

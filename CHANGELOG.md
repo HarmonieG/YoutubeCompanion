@@ -2,6 +2,11 @@
 
 Ce fichier est affiché dans l'app (🔔 en haut à droite). Format : un titre `## version — date — résumé`, puis une liste à puces.
 
+## 0.8.1 — 24 novembre 2026 — « Déjà vue » plus strict
+- Une vidéo compte comme « Déjà vue » à partir de 50 % regardés (réglable dans Réglages). Une vidéo juste ouverte n'est plus proposée au retrait.
+- L'historique seul ne suffit plus quand la barre de progression YouTube est connue.
+- Chaque vidéo de l'onglet « Déjà vues » affiche le pourcentage regardé.
+
 ## 0.8.0 — 24 novembre 2026 — Le grand ménage
 - 🧹 Nouvel onglet « Déjà vues » : toutes les vidéos déjà vues mais encore dans ta liste « À regarder plus tard », les plus sûres en premier. Retire-les une par une, toutes d'un coup, ou garde-les. Un rappel s'affiche sur l'accueil quand il y en a.
 - Le script (v1.2) lit la barre de progression rouge de YouTube : une vidéo vue sur ta télé ou ton téléphone est reconnue. Pense à mettre à jour le script.

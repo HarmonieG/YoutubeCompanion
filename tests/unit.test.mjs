@@ -177,3 +177,20 @@ test('journal des nouveautés : lecture de CHANGELOG.md', async () => {
   const n = (v) => v.split('.').reduce((a, x) => a * 1000 + Number(x), 0);
   for (let i = 1; i < entries.length; i++) assert.ok(n(entries[i - 1].version) > n(entries[i].version));
 });
+
+test('« Déjà vue » seulement à partir de 50 % regardés', () => {
+  const s = emptyState();
+  s.history.watchedIds = ['a0000000000', 'b0000000000', 'c0000000000'];
+  const ctx = buildContext(s);
+  const t = (v) => autoTags({ title: 't', ...v }, ctx);
+  assert.ok(!t({ id: 'a0000000000', ytProgress: 0.04 }).includes('Déjà vue'), 'juste ouverte : pas vue');
+  assert.ok(t({ id: 'a0000000000', ytProgress: 0.04 }).length >= 0);
+  assert.ok(t({ id: 'b0000000000', ytProgress: 0.3 }).includes('Commencée'));
+  assert.ok(!t({ id: 'b0000000000', ytProgress: 0.3 }).includes('Déjà vue'));
+  assert.ok(t({ id: 'x0000000000', ytProgress: 0.55 }).includes('Déjà vue'));
+  assert.ok(t({ id: 'x0000000000', progress: 0.6 }).includes('Déjà vue'));
+  // progression inconnue (ancien script) : on se rabat sur l'historique
+  assert.ok(t({ id: 'c0000000000' }).includes('Déjà vue'));
+  s.settings.seenThreshold = 0.9;
+  assert.ok(!autoTags({ id: 'x0000000000', title: 't', ytProgress: 0.55 }, buildContext(s)).includes('Déjà vue'));
+});

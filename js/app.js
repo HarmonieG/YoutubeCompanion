@@ -698,22 +698,25 @@ function renderSeen() {
     return `<section class="empty">
       <h2>🧹 Rien à trier</h2>
       <p>Aucune vidéo déjà vue ne traîne dans ta liste « À regarder plus tard ».</p>
-      <p class="hint">Companion repère les vidéos vues grâce à la barre de progression YouTube (lue à chaque synchro), à ce que tu regardes ici et à ton historique.</p>
+      <p class="hint">Une vidéo compte comme vue à partir de ${Math.round((settings().seenThreshold ?? 0.5) * 100)} % regardés, d'après la barre de progression YouTube (lue à chaque synchro) ou ta lecture dans Companion.</p>
     </section>`;
   }
   const sure = sug.filter((x) => x.certainty >= 2).length;
-  const label = { 3: 'Vue', 2.5: 'Indisponible', 2: 'Vue', 1: 'Probable' };
+  const unknown = sug.length - sure;
+  const pct = Math.round((settings().seenThreshold ?? 0.5) * 100);
+  const badge = (v, c) => (c === 2.5 ? 'Indisponible' : c === 1 ? 'Probable' : `${Math.round(Math.max(v.progress || 0, v.ytProgress || 0) * 100)} %`);
   return `<section class="panel">
     <h2>🧹 Déjà vues, mais encore dans « À regarder plus tard »</h2>
-    <p>${sug.length} vidéo${sug.length > 1 ? 's' : ''}${sure ? `, dont <b>${sure}</b> sûre${sure > 1 ? 's' : ''} (barre de progression YouTube, lecture dans Companion ou vidéo indisponible)` : ''}. Les autres apparaissent dans ton historique : tu les as au moins ouvertes.</p>
+    <p><b>${sure}</b> vidéo${sure > 1 ? 's' : ''} regardée${sure > 1 ? 's' : ''} à au moins ${pct} % (ou devenue${sure > 1 ? 's' : ''} indisponible${sure > 1 ? 's' : ''}).${unknown ? ` ${unknown} autre${unknown > 1 ? 's' : ''} apparai${unknown > 1 ? 'ssent' : 't'} dans ton historique sans progression connue : resynchronise avec le script à jour (v1.2) pour trancher.` : ''}</p>
+    <p class="hint">Seuil réglable dans Réglages (« Déjà vue » à partir de ${pct} %).</p>
     <div class="row">
-      ${sure ? `<button class="primary small" data-act="sug-all" data-min="2">Retirer les ${sure} sûres</button>` : ''}
-      <button class="${sure ? 'ghost' : 'primary'} small" data-act="sug-all" data-min="0">Tout retirer (${sug.length})</button>
+      ${sure ? `<button class="primary small" data-act="sug-all" data-min="2">Retirer ${unknown ? `les ${sure} vues` : `les ${sure}`}</button>` : ''}
+      ${unknown ? `<button class="${sure ? 'ghost' : 'primary'} small" data-act="sug-all" data-min="0">Tout retirer (${sug.length})</button>` : ''}
     </div>
   </section>
   <section class="qlist sug">${sug.slice(0, 200).map(({ v, certainty, reason }) => `<div class="qrow" data-id="${v.id}">
       <img loading="lazy" src="${esc(thumbOf(v))}" alt="" onerror="this.style.visibility='hidden'">
-      <div><b data-act="open">${esc(v.title || v.id)}</b><small><span class="cert c${String(certainty).replace('.', '')}">${label[certainty] || ''}</span> ${esc(reason)}</small></div>
+      <div><b data-act="open">${esc(v.title || v.id)}</b><small><span class="cert c${String(certainty).replace('.', '')}">${badge(v, certainty)}</span> ${esc(reason)}</small></div>
       <button class="ghost small" data-act="keep-sug">Garder</button>
       <button class="primary small" data-act="queue-sug">Retirer</button>
     </div>`).join('')}${sug.length > 200 ? `<p class="hint">… et ${sug.length - 200} autres.</p>` : ''}</section>`;
@@ -962,7 +965,8 @@ function renderSettings() {
       ${numField('tierAppr', '👍 Appréciés : nombre de créateurs', s.tierAppr)}
       ${numField('lostDays', '🕰️ « Perdu de vue » après (jours sans le regarder)', s.lostDays)}
       ${numField('alienMaxViews', '« Alien » jusqu\'à (vues de la chaîne)', s.alienMaxViews)}
-      ${numField('watchedThreshold', 'Retirer automatiquement après (% regardé)', Math.round(s.watchedThreshold * 100))}
+      ${numField('seenThreshold', '« Déjà vue » à partir de (% regardé)', Math.round((s.seenThreshold ?? 0.5) * 100))}
+      ${numField('watchedThreshold', 'Retirer automatiquement en fin de lecture après (% regardé)', Math.round(s.watchedThreshold * 100))}
       <label class="field">Vitesse par défaut
         <select id="defaultSpeed">${SPEEDS.map((x) => `<option value="${x}" ${x === s.defaultSpeed ? 'selected' : ''}>×${x}</option>`).join('')}</select>
       </label>
@@ -1003,6 +1007,7 @@ function saveSetting(id, raw) {
   const n = Number(raw);
   if (id === 'quickMax') s.quickMax = Math.max(0, n) * 60;
   else if (id === 'watchedThreshold') s.watchedThreshold = Math.min(1, Math.max(0.3, n / 100));
+  else if (id === 'seenThreshold') s.seenThreshold = Math.min(1, Math.max(0.1, n / 100));
   else s[id] = Math.max(0, n);
   store.changed('settings');
 }
