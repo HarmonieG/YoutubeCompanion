@@ -1,4 +1,4 @@
-// Test de bout en bout avec Playwright (réseau simulé) : node tests/e2e.mjs
+// Test de bout en bout avec Playwright (YouTube et Google simulés) : node tests/e2e.mjs
 // Prérequis : serveur local sur http://localhost:8080 (npm run serve)
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -10,34 +10,37 @@ fs.mkdirSync(OUT, { recursive: true });
 const words = ['Blender tuto donut', 'Godot devlog #12', 'Peindre des figurines Warhammer', 'Pixel art pour débutants', 'Video essay: why games feel good',
   'Raspberry Pi cyberdeck build', 'Unity C# tips', 'ASMR lofi ambiance', 'Krita brush review', 'Impression 3D : test Bambu', 'GDC talk game design', 'NES homebrew'];
 const chans = ['Blender Guru', 'GDQuest', 'Squidmar Miniatures', 'Brackeys', 'Inconnu 1', 'Inconnu 2', 'Game Maker\'s Toolkit'];
+const chanId = (i) => 'UC' + String(i).padStart(22, 'c');
 const items = Array.from({ length: 240 }, (_, i) => ({
   id: ('v' + String(i).padStart(10, '0')).slice(0, 11),
   title: words[i % words.length] + ' ' + i,
   channelTitle: chans[i % chans.length],
-  durationText: `${(i * 7) % 70}:${String(i % 60).padStart(2, '0')}`,
+  channelId: chanId(i % chans.length),
+  duration: 40 + ((i * 397) % 4200),
   index: i,
 }));
-fs.writeFileSync('/tmp/wl.json', JSON.stringify({ source: 'plustard-wl', items }));
+const payload = { source: 'plustard-wl', v: 2, items };
 const hist = [];
 for (let i = 0; i < 400; i++) {
   const c = i % 3; // les 3 premières chaînes très regardées
-  hist.push({ header: 'YouTube', title: 'Vous avez regardé ' + words[i % words.length], titleUrl: `https://www.youtube.com/watch?v=h${String(i).padStart(10, '0')}`.slice(0, 43), subtitles: [{ name: chans[c], url: 'https://www.youtube.com/channel/UC' + c }], time: '2025-05-01T00:00:00Z' });
+  hist.push({ header: 'YouTube', title: 'Vous avez regardé ' + words[i % words.length], titleUrl: 'https://www.youtube.com/watch?v=h' + String(i).padStart(10, '0'), subtitles: [{ name: chans[c], url: 'https://www.youtube.com/channel/' + chanId(c) }], time: '2025-05-01T00:00:00Z' });
 }
-hist.push({ header: 'YouTube', title: 'Vous avez regardé x', titleUrl: 'https://www.youtube.com/watch?v=' + items[5].id, subtitles: [{ name: chans[5], url: 'https://www.youtube.com/channel/UC5' }] });
+hist.push({ header: 'YouTube', title: 'Vous avez regardé x', titleUrl: 'https://www.youtube.com/watch?v=' + items[5].id, subtitles: [{ name: chans[5], url: 'https://www.youtube.com/channel/' + chanId(5) }] });
 fs.writeFileSync('/tmp/watch-history.json', JSON.stringify(hist));
 
-const FAKE_YT = `window.YT={PlayerState:{PLAYING:1,ENDED:0},Player:function(el,o){var t=0,self=this;this.getDuration=()=>100;this.getCurrentTime=()=>t;
+// Faux lecteur YouTube : la vidéo « dure » 100 s et avance de 10 s toutes les 60 ms, puis se termine.
+const FAKE_YT = `window.YT={PlayerState:{PLAYING:1,ENDED:0},Player:function(el,o){var t=0,self=this,ended=false;this.getDuration=()=>100;this.getCurrentTime=()=>t;
  this.setPlaybackRate=r=>{window.__rate=r};this.getAvailablePlaybackRates=()=>[1,1.5,2];this.destroy=()=>clearInterval(self.i);
  var f=document.createElement('div');f.id='fakeplayer';f.textContent='LECTEUR '+o.videoId;f.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#222';el.replaceWith(f);
- setTimeout(()=>{o.events.onReady();o.events.onStateChange({data:1});self.i=setInterval(()=>{t+=10},150)},50)}};window.onYouTubeIframeAPIReady&&window.onYouTubeIframeAPIReady();`;
+ setTimeout(()=>{o.events.onReady();o.events.onStateChange({data:1});self.i=setInterval(()=>{t+=10;if(t>=100&&!ended){ended=true;t=100;o.events.onStateChange({data:0})}},60)},50)}};window.onYouTubeIframeAPIReady&&window.onYouTubeIframeAPIReady();`;
 
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
 const errors = [];
 async function newPage(viewport) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2 });
   await ctx.route(/fonts\.(googleapis|gstatic)|ytimg|accounts\.google/, (r) => r.abort());
-  await ctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ contentType: 'text/javascript', body: FAKE_YT }));
   await ctx.route(/googleapis\.com/, (r) => r.fulfill({ status: 404, body: '{}' }));
+  await ctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ contentType: 'text/javascript', body: FAKE_YT }));
   // Faux jeton pour passer le mur de connexion
   await ctx.addInitScript(() => { if (location.hostname === 'localhost') localStorage.setItem('yc-token', JSON.stringify({ access_token: 'test', expires_at: Date.now() + 3600e3 })); });
   const page = await ctx.newPage();
@@ -45,6 +48,7 @@ async function newPage(viewport) {
   page.on('console', (m) => { if (m.type() === 'error' && !/ERR_FAILED|net::|404/.test(m.text())) errors.push(m.text()); });
   return page;
 }
+const log = (...a) => console.log('•', ...a);
 
 // ---------- mur de connexion ----------
 {
@@ -53,110 +57,83 @@ async function newPage(viewport) {
   const p0 = await ctx0.newPage();
   await p0.goto(BASE);
   await p0.waitForSelector('.login');
-  console.log('mur de connexion', await p0.locator('.login [data-act=signin]').count(), 'nav', await p0.locator('#nav button').count());
-  await p0.screenshot({ path: `${OUT}/00-login.png` });
+  log('mur de connexion', await p0.locator('.login [data-act=signin]').count(), 'nav', await p0.locator('#nav button').count());
 }
 
-// ---------- mobile ----------
+// ---------- onboarding (mobile) ----------
 const page = await newPage({ width: 390, height: 844 });
 await page.goto(BASE);
-await page.screenshot({ path: `${OUT}/01-setup.png` });
+await page.waitForSelector('.setup');
+await page.screenshot({ path: `${OUT}/01-onboarding-script.png`, fullPage: true });
 await page.click('[data-act=setup-next]');
-await page.setInputFiles('input[data-file=wl]', '/tmp/wl.json');
-await page.waitForSelector('text=240 vidéos importées');
+await page.screenshot({ path: `${OUT}/02-onboarding-synchro.png`, fullPage: true });
+// la liste arrive du script
+await page.evaluate((p) => window.__yc.applyPayload(p, 'Synchro YouTube'), payload);
+await page.waitForSelector('text=vidéos reçues');
+log('onboarding après réception :', await page.locator('.setup h2').innerText());
 await page.click('[data-act=setup-next]');
 await page.setInputFiles('input[data-file=history]', '/tmp/watch-history.json');
-await page.waitForSelector('text=visionnages importés');
-await page.click('[data-act=setup-next]');
-await page.click('[data-act=setup-next]');
+await page.waitForSelector('.toast >> text=Historique');
 await page.click('[data-act=interest][data-tag="Godot"]');
-await page.screenshot({ path: `${OUT}/02-questions.png`, fullPage: true });
+await page.screenshot({ path: `${OUT}/03-onboarding-gouts.png`, fullPage: true });
 await page.click('[data-act=setup-done]');
-await page.waitForSelector('.card');
-const cards = await page.locator('.card').count();
-console.log('cartes affichées', cards);
-await page.screenshot({ path: `${OUT}/03-liste.png` });
 
-await page.click('[data-act=panel]');
-await page.screenshot({ path: `${OUT}/04-tags.png` });
-await page.click('.facets [data-tag="Rapide"]');
-const rapide = await page.locator('.summary b').innerText();
-await page.click('.facets [data-tag="Créateur préféré"]').catch(() => {});
-console.log('rapides', rapide, '→ + préféré', await page.locator('.summary b').innerText());
-await page.click('[data-act=panel]');
-await page.screenshot({ path: `${OUT}/05-filtre.png` });
+// ---------- accueil ----------
+await page.waitForSelector('.shelf');
+const shelves = await page.locator('.shelf > header h3').allInnerTexts();
+log('rayons', shelves.map((s) => s.replace(/\s+/g, ' ')).join(' | '));
+await page.screenshot({ path: `${OUT}/04-accueil.png` });
+await page.screenshot({ path: `${OUT}/04b-accueil-full.png`, fullPage: true });
+
+// ⓘ pourquoi
+await page.locator('.shelf[data-shelf=foryou] .why-btn').first().click();
+await page.waitForSelector('#picker .reasons');
+log('raisons', (await page.locator('#picker .reasons').innerText()).replace(/\n/g, ' / '));
+await page.screenshot({ path: `${OUT}/05-pourquoi.png` });
+const before = await page.locator('#picker .why .hint b').innerText();
+await page.locator('#picker .adj').nth(1).locator('[data-d="1"]').click();
+log('score avant/après +', before, '→', await page.locator('#picker .why .hint b').innerText());
+await page.click('#picker [data-act=pickclose]');
+
+// rayon → liste
+await page.locator('.shelf[data-shelf=quick] [data-act=shelf-all]').click();
+await page.waitForSelector('.listtitle');
+log('liste depuis rayon', await page.locator('.listtitle').innerText(), '|', (await page.locator('.summary').innerText()).replace(/\n/g, ' '));
+
+// ---------- liste : session de 30 min ----------
 await page.click('[data-act=clear]');
+await page.click('[data-act=budget][data-b="1800"]');
+const summary = await page.locator('.summary span').first().innerText();
+const chansSeq = await page.locator('.grid.seq .card .chan').allInnerTexts();
+const consecutive = chansSeq.some((c, i) => i && c === chansSeq[i - 1]);
+log('session 30 min :', summary, '| même chaîne deux fois de suite ?', consecutive);
+await page.screenshot({ path: `${OUT}/06-liste-session.png` });
 
-await page.fill('#search', 'godot');
-await page.waitForTimeout(400);
-console.log('recherche godot', await page.locator('.summary b').innerText());
-await page.fill('#search', '');
-await page.waitForTimeout(400);
-
-// lecteur + séquence de fin à 80 %
-await page.locator('.card [data-act=open]').first().click();
+// lecture enchaînée : fin de vidéo → compte à rebours → suivante
+await page.click('[data-act=playall]');
 await page.waitForSelector('#fakeplayer');
-await page.click('[data-act=speed][data-speed="1.5"]');
-console.log('vitesse', await page.evaluate(() => window.__rate));
-await page.waitForSelector('#endsheet:not([hidden])', { timeout: 5000 });
-await page.screenshot({ path: `${OUT}/06-fin.png` });
-console.log('file de retrait', await page.evaluate(() => Object.values(window.__yc.store.state.videos).filter((v) => v.status === 'queued').length));
-await page.fill('.addtag input', 'À revoir');
-await page.press('.addtag input', 'Enter');
-console.log('tag perso', await page.locator('.vtags .chip', { hasText: 'À revoir' }).count());
+const first = await page.locator('#fakeplayer').innerText();
+log('position', await page.locator('.sesspos').innerText());
+await page.waitForSelector('.countdown', { timeout: 8000 });
+await page.screenshot({ path: `${OUT}/07-fin-compte-a-rebours.png` });
+await page.waitForFunction((f) => document.querySelector('#fakeplayer')?.textContent !== f, first, { timeout: 9000 });
+log('suivante lancée automatiquement :', await page.locator('.sesspos').innerText());
 await page.click('[data-act=close]');
-await page.locator('.card [data-act=queue]').first().click();
-await page.click('[data-go=queue]');
-await page.screenshot({ path: `${OUT}/07-a-retirer.png`, fullPage: true });
-await page.click('[data-go=import]');
-await page.screenshot({ path: `${OUT}/08-import.png`, fullPage: true });
-await page.click('[data-go=settings]');
-await page.screenshot({ path: `${OUT}/09-reglages.png` });
+log('à retirer', await page.evaluate(() => Object.values(window.__yc.store.state.videos).filter((v) => v.status === 'queued').length));
 
-// ---------- persistance ----------
-await page.reload();
-await page.waitForSelector('.card');
-console.log('après rechargement', await page.locator('#nav').innerText());
+await page.click('[data-go=settings]');
+await page.screenshot({ path: `${OUT}/08-reglages.png` });
 
 // ---------- desktop ----------
 const d = await newPage({ width: 1366, height: 900 });
 await d.goto(BASE);
-await d.click('[data-act=setup-next]');
-await d.setInputFiles('input[data-file=wl]', '/tmp/wl.json');
-await d.click('[data-act=setup-next]');
-await d.click('[data-act=setup-next]');
-await d.click('[data-act=setup-next]');
-await d.click('[data-act=setup-done]');
-await d.waitForSelector('.card');
-await d.screenshot({ path: `${OUT}/10-desktop.png` });
-await d.locator('.card [data-act=open]').nth(2).click();
-await d.waitForSelector('#fakeplayer');
-await d.screenshot({ path: `${OUT}/11-desktop-lecteur.png` });
+await d.waitForFunction(() => window.__yc);
+await d.evaluate(async (p) => { window.__yc.store.state.settings.setupDone = true; window.__yc.ui.view = 'home'; window.__yc.applyPayload(p, 'test'); }, payload);
+await d.click('[data-go=home]');
+await d.waitForSelector('.shelf');
+await d.screenshot({ path: `${OUT}/10-desktop-accueil.png` });
+await d.click('[data-go=library]');
+await d.screenshot({ path: `${OUT}/11-desktop-liste.png` });
 
-// ---------- bookmarklets sur un faux YouTube ----------
-const { BOOKMARKLETS } = await import('../js/bookmarklets.js');
-const yt = await newPage({ width: 1200, height: 800 });
-await yt.route('https://www.youtube.com/**', (r) => {
-  const url = r.request().url();
-  if (url.includes('edit_playlist')) {
-    const body = JSON.parse(r.request().postData());
-    yt.__edits = (yt.__edits || 0) + body.actions.length;
-    return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'STATUS_SUCCEEDED' }) });
-  }
-  const rows = items.slice(0, 120).map((it) => `<ytd-playlist-video-renderer><a id="video-title" title="${it.title}" href="/watch?v=${it.id}&list=WL&index=${it.index}">${it.title}</a><ytd-channel-name><a href="/@x">${it.channelTitle}</a></ytd-channel-name><ytd-thumbnail-overlay-time-status-renderer>${it.durationText}</ytd-thumbnail-overlay-time-status-renderer></ytd-playlist-video-renderer>`).join('');
-  return r.fulfill({ contentType: 'text/html', body: `<html><body><script>window.ytcfg={get:k=>({INNERTUBE_CONTEXT:{client:{}},SESSION_INDEX:0})[k]};document.cookie='SAPISID=abc'</script>${rows}<div style="height:3000px"></div></body></html>` });
-});
-await yt.goto('https://www.youtube.com/playlist?list=WL');
-const dl = yt.waitForEvent('download');
-await yt.evaluate(BOOKMARKLETS.export.code);
-const file = await dl;
-const p = await file.path();
-const exported = JSON.parse(fs.readFileSync(p, 'utf8'));
-console.log('bookmarklet export', exported.count, exported.items[3]);
-yt.on('dialog', (dlg) => dlg.accept(dlg.type() === 'prompt' ? items.slice(0, 30).map((i) => i.id).join(',') : undefined));
-await yt.evaluate(BOOKMARKLETS.purge.code);
-await yt.waitForTimeout(1500);
-console.log('bookmarklet purge, actions envoyées :', yt.__edits);
-
-console.log('ERREURS', errors);
+log('ERREURS', errors);
 await browser.close();

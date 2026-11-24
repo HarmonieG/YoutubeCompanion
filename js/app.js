@@ -1,9 +1,10 @@
 import { store } from './store.js';
 import { GOOGLE_CLIENT_ID } from './config.js';
 import {
-  GROUPS, DEFAULT_RULES, buildContext, videoTags, autoTags, groupOfTag, relevance, similarity,
+  GROUPS, DEFAULT_RULES, buildContext, videoTags, autoTags, groupOfTag, explain, similarity,
   formatDuration, normalizeText, channelKey, channelOf,
 } from './tagger.js';
+import { buildShelves, buildSequence, matchesFilter } from './curation.js';
 import { parseWatchLater, parseHistory, readFileText } from './importers.js';
 import {
   importWatchLater, importHistory, syncSubscriptions, enrichVideos, queueRemoval, unqueue,
@@ -24,25 +25,38 @@ const fmtDate = (t) => (t ? new Date(t).toLocaleDateString('fr-FR', { day: 'nume
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
 
 const ui = {
-  view: 'library',
-  filters: [],        // { type: 'tag'|'channel', value, label, neg }
+  view: 'home',
+  filters: [],        // { type: 'tag'|'channel'|'dur', value, label, neg }
+  budget: 0,          // durée de session en secondes (0 = libre)
+  session: null,      // { ids, index } : lecture enchaînée en cours
   search: '',
   sort: 'relevance',
   limit: 60,
   panel: false,
-  setupStep: 0,
   seed: Math.random(),
 };
 
 let ctx = null;
 let tagCache = new Map();
+let whyCache = new Map();
 function getCtx() {
   if (!ctx) {
     ctx = buildContext(st());
     tagCache = new Map();
+    whyCache = new Map();
   }
   return ctx;
 }
+function whyOf(v) {
+  getCtx();
+  let w = whyCache.get(v.id);
+  if (!w) { w = explain(v, tagsOf(v), ctx); whyCache.set(v.id, w); }
+  return w;
+}
+const scoreOf = (v) => whyOf(v).score;
+const channelHelpers = {
+  channelMatches: (v, f) => channelKey(v, getCtx()) === f.value || (!channelKey(v, getCtx()) && v.channelTitle === f.label),
+};
 function tagsOf(v) {
   getCtx();
   let t = tagCache.get(v.id);
@@ -153,13 +167,14 @@ function render() {
     return;
   }
   ui.unlocked = true;
+  if (ui.view === 'import') ui.view = 'settings';
   renderHeader();
   document.body.dataset.view = ui.view;
   if (ui.view === 'setup') main.innerHTML = renderSetup();
   else if (ui.view === 'queue') main.innerHTML = renderQueue();
-  else if (ui.view === 'import') main.innerHTML = renderImport();
-  else if (ui.view === 'settings') main.innerHTML = renderSettings();
-  else main.innerHTML = renderLibrary();
+  else if (ui.view === 'settings') main.innerHTML = renderImport() + renderSettings();
+  else if (ui.view === 'library') main.innerHTML = renderLibrary();
+  else main.innerHTML = renderHome();
   afterRender();
 }
 
@@ -176,10 +191,10 @@ function renderLogin() {
 function renderHeader() {
   const q = videosByStatus('queued').length;
   const a = videosByStatus('active').length;
-  $('#nav').innerHTML = [
+  $('#nav').innerHTML = ui.view === 'setup' ? '' : [
+    ['home', 'Accueil'],
     ['library', `Liste <small>${a}</small>`],
     ['queue', `À retirer ${q ? `<small class="hot">${q}</small>` : ''}`],
-    ['import', 'Import'],
     ['settings', 'Réglages'],
   ].map(([v, l]) => `<button class="${ui.view === v ? 'on' : ''}" data-go="${v}">${l}</button>`).join('');
   const syncIcon = { off: '', idle: '☁︎', saving: '⟳', error: '⚠︎' }[auth.signedIn && settings().sync ? syncState : 'off'];
@@ -188,7 +203,62 @@ function renderHeader() {
     : `<button class="primary small" data-act="signin">Connexion Google</button>`;
 }
 
-// ---------------------------------------------------------------- bibliothèque
+const fmtTotal = (sec) => (sec >= 3600 ? `${Math.round(sec / 360) / 10} h` : `${Math.max(1, Math.round(sec / 60))} min`).replace('.', ',');
+
+function emptyList() {
+  return `<section class="empty">
+    <h2>Ta liste est vide</h2>
+    <p>Commence par synchroniser ta playlist « À regarder plus tard ».</p>
+    <button class="primary" data-go="${settings().setupDone ? 'settings' : 'setup'}">Synchroniser ma liste</button>
+  </section>`;
+}
+
+// ---------------------------------------------------------------- accueil (curation)
+function renderHome() {
+  const active = videosByStatus('active');
+  if (!active.length) return emptyList();
+  const items = active.map((v) => ({ v, tags: tagsOf(v), score: scoreOf(v) }));
+  const shelves = buildShelves(items, { interests: settings().interests, ctx: getCtx(), helpers: channelHelpers });
+  ui.shelves = Object.fromEntries(shelves.map((sh) => [sh.id, sh]));
+  const total = active.reduce((t, v) => t + (v.duration || 0), 0);
+  const q = videosByStatus('queued').length;
+  return `<section class="hero">
+      <div>
+        <h2>${active.length.toLocaleString('fr-FR')} vidéos à regarder</h2>
+        <p class="hint">${total ? `Environ ${fmtTotal(total)} de visionnage. ` : ''}${st().wlImportedAt ? `Dernière synchro : ${fmtDate(st().wlImportedAt)}.` : ''}</p>
+      </div>
+      <div class="row">
+        <a class="ghost small btn" href="${syncUrl()}" data-act="syncyt">⟳ Synchroniser${q ? ` (−${q})` : ''}</a>
+        <button class="ghost small" data-act="surprise">🎲 Surprends-moi</button>
+      </div>
+    </section>
+    ${shelves.map(renderShelf).join('')}`;
+}
+
+function renderShelf(sh) {
+  return `<section class="shelf" data-shelf="${esc(sh.id)}">
+    <header>
+      <h3><span class="ico">${sh.icon}</span> ${esc(sh.title)} <small>${sh.total}</small></h3>
+      <div class="row tight">
+        ${sh.cleanup ? `<button class="ghost small" data-act="shelf-clean">Tout retirer</button>` : ''}
+        <button class="linkbtn" data-act="shelf-all">Tout voir →</button>
+      </div>
+    </header>
+    <p class="why">${esc(sh.why)}</p>
+    <div class="rail">${sh.items.map(({ v }) => card(v, { mini: true, shelf: sh.id })).join('')}</div>
+  </section>`;
+}
+
+function shelfToList(sh) {
+  ui.filters = sh.filters.map((f) => ({ ...f }));
+  ui.search = '';
+  ui.sort = { score: 'relevance', recent: 'relevance', published: 'published', shuffle: 'random' }[sh.sort] || 'relevance';
+  ui.listTitle = `${sh.icon} ${sh.title}`;
+  ui.limit = 60;
+  go('library');
+}
+
+// ---------------------------------------------------------------- liste (enchaînement)
 function matchesSearch(v, tags, terms) {
   if (!terms.length) return true;
   const hay = normalizeText([v.title, v.channelTitle, tags.join(' ')].join(' '));
@@ -196,15 +266,12 @@ function matchesSearch(v, tags, terms) {
 }
 
 function applyFilters(list) {
-  const c = getCtx();
   const terms = normalizeText(ui.search).split(/\s+/).filter(Boolean);
   return list.filter((v) => {
     const tags = tagsOf(v);
     if (!matchesSearch(v, tags, terms)) return false;
     for (const f of ui.filters) {
-      let hit;
-      if (f.type === 'tag') hit = tags.includes(f.value);
-      else hit = channelKey(v, c) === f.value || (!channelKey(v, c) && v.channelTitle === f.label);
+      const hit = matchesFilter(v, tags, f, channelHelpers);
       if (hit === !!f.neg) return false;
     }
     return true;
@@ -212,9 +279,8 @@ function applyFilters(list) {
 }
 
 function sortList(list) {
-  const c = getCtx();
   const by = {
-    relevance: (a, b) => relevance(b, tagsOf(b), c) - relevance(a, tagsOf(a), c),
+    relevance: (a, b) => scoreOf(b) - scoreOf(a),
     order: (a, b) => (a.position ?? 1e9) - (b.position ?? 1e9),
     reverse: (a, b) => (b.position ?? -1) - (a.position ?? -1),
     short: (a, b) => (a.duration ?? 1e9) - (b.duration ?? 1e9),
@@ -235,32 +301,38 @@ function currentList() {
   return sortList(applyFilters(videosByStatus('active')));
 }
 
+// La liste affichée = un enchaînement : varié (pas deux fois la même chaîne d'affilée) et,
+// si un temps est choisi, limité à ce temps.
+function currentSequence() {
+  const list = currentList();
+  const diversify = ui.sort === 'relevance' || ui.budget;
+  if (!diversify) return { items: list, total: list.reduce((t, v) => t + (v.duration || 0), 0), matched: list.length };
+  const seq = buildSequence(list.map((v) => ({ v })), { budget: ui.budget, keyOf: (v) => channelKey(v, getCtx()) || v.channelTitle });
+  return { items: seq.items.map((it) => it.v), total: seq.total, matched: list.length };
+}
+
 function chip(tag, { active, neg, count, removable, small } = {}) {
   const g = groupOfTag(tag, getCtx());
   return `<button class="chip g-${g} ${active ? 'on' : ''} ${neg ? 'neg' : ''} ${small ? 'sm' : ''}" data-act="tag" data-tag="${esc(tag)}">${neg ? '− ' : ''}${esc(tag)}${count != null ? ` <i>${count}</i>` : ''}${removable ? ' <b data-act="unfilter" data-tag="' + esc(tag) + '">×</b>' : ''}</button>`;
 }
 
-function renderLibrary() {
-  const all = videosByStatus('active');
-  if (!all.length) {
-    return `<section class="empty">
-      <h2>Ta liste est vide</h2>
-      <p>Commence par importer ta playlist « À regarder plus tard ».</p>
-      <button class="primary" data-go="${settings().setupDone ? 'import' : 'setup'}">Importer ma liste</button>
-    </section>`;
-  }
-  const list = currentList();
-  const shown = list.slice(0, ui.limit);
-  const totalTime = list.reduce((s, v) => s + (v.duration || 0), 0);
+const BUDGETS = [[0, 'Libre'], [15 * 60, '15 min'], [30 * 60, '30 min'], [3600, '1 h'], [7200, '2 h']];
 
-  const active = ui.filters.map((f) => f.type === 'tag'
-    ? chip(f.value, { active: true, neg: f.neg, removable: true })
-    : `<button class="chip g-chan on ${f.neg ? 'neg' : ''}" data-act="unfilter-chan" data-chan="${esc(f.value)}">${f.neg ? '− ' : ''}▶ ${esc(f.label)} <b>×</b></button>`).join('');
+function renderLibrary() {
+  if (!videosByStatus('active').length) return emptyList();
+  const seq = currentSequence();
+  const shown = ui.budget ? seq.items : seq.items.slice(0, ui.limit);
+  const active = ui.filters.map((f, i) => {
+    if (f.type === 'tag') return chip(f.value, { active: true, neg: f.neg, removable: true });
+    const label = f.type === 'dur' ? `⏱ ${f.label}` : `▶ ${f.label}`;
+    return `<button class="chip ${f.type === 'dur' ? 'g-duree' : 'g-chan'} on ${f.neg ? 'neg' : ''}" data-act="unfilter-i" data-i="${i}">${f.neg ? '− ' : ''}${esc(label)} <b>×</b></button>`;
+  }).join('');
 
   return `
   <section class="toolbar">
+    ${ui.listTitle && ui.filters.length ? `<h2 class="listtitle">${esc(ui.listTitle)}</h2>` : ''}
     <div class="searchrow">
-      <input id="search" type="search" placeholder="Rechercher un titre, une chaîne, un tag…" value="${esc(ui.search)}" autocomplete="off">
+      <input id="search" type="search" placeholder="Rechercher…" value="${esc(ui.search)}" autocomplete="off">
       <select id="sort" aria-label="Trier">
         ${[['relevance', 'Pour moi'], ['order', 'Ordre de la liste'], ['reverse', 'Ordre inversé'], ['short', 'Plus courtes'], ['long', 'Plus longues'], ['published', 'Publiées récemment'], ['random', 'Aléatoire']]
           .map(([k, l]) => `<option value="${k}" ${ui.sort === k ? 'selected' : ''}>${l}</option>`).join('')}
@@ -271,18 +343,25 @@ function renderLibrary() {
       ${active}
       ${ui.filters.length || ui.search ? '<button class="linkbtn" data-act="clear">Tout effacer</button>' : ''}
     </div>
-    ${ui.panel ? renderFacets(list) : ''}
+    ${ui.panel ? renderFacets(applyFilters(videosByStatus('active'))) : ''}
+    <div class="session">
+      <span class="lbl">J'ai</span>
+      ${BUDGETS.map(([b, l]) => `<button class="chip g-duree ${ui.budget === b ? 'on' : ''}" data-act="budget" data-b="${b}">${l}</button>`).join('')}
+    </div>
     <div class="summary">
-      <span><b>${list.length}</b> vidéo${list.length > 1 ? 's' : ''}${totalTime ? ` · ${Math.round(totalTime / 3600)} h` : ''}</span>
+      <span>${ui.budget
+        ? `<b>${seq.items.length}</b> vidéo${seq.items.length > 1 ? 's' : ''} · ${fmtTotal(seq.total)} <small>(sur ${seq.matched})</small>`
+        : `<b>${seq.matched}</b> vidéo${seq.matched > 1 ? 's' : ''}${seq.total ? ` · ${fmtTotal(seq.total)}` : ''}`}</span>
       <span class="actions">
-        <button class="ghost small" data-act="surprise">🎲 Surprends-moi</button>
-        ${(ui.filters.length || ui.search) && list.length ? `<button class="ghost small" data-act="bulkqueue">Retirer ces ${list.length}</button>` : ''}
+        ${seq.items.length ? `<button class="primary small" data-act="playall">▶ ${ui.budget ? 'Lancer la session' : 'Tout lire'}</button>` : ''}
+        ${(ui.filters.length || ui.search) && seq.matched ? `<button class="ghost small" data-act="bulkqueue">Retirer ces ${seq.matched}</button>` : ''}
       </span>
     </div>
   </section>
-  <section class="grid">${shown.map(card).join('')}</section>
-  ${list.length > shown.length ? `<div class="more"><button class="ghost" data-act="more">Afficher plus (${list.length - shown.length})</button></div>` : ''}
-  ${!list.length ? '<p class="empty">Aucune vidéo ne correspond. Essaie d\'enlever un filtre.</p>' : ''}`;
+  <section class="grid seq">${shown.map((v, i) => card(v, { num: i + 1 })).join('')}</section>
+  ${!ui.budget && seq.items.length > shown.length ? `<div class="more"><button class="ghost" data-act="more">Afficher plus (${seq.items.length - shown.length})</button></div>` : ''}
+  ${!seq.matched ? '<p class="empty">Aucune vidéo ne correspond. Essaie d\'enlever un filtre.</p>' : ''}
+  ${seq.matched && !seq.items.length ? '<p class="empty">Rien ne tient dans ce temps-là. Essaie une durée plus longue.</p>' : ''}`;
 }
 
 function renderFacets(list) {
@@ -301,21 +380,23 @@ function renderFacets(list) {
   </div>`;
 }
 
-function card(v) {
+function card(v, { mini = false, num = 0, shelf = '' } = {}) {
   const tags = tagsOf(v);
-  const shownTags = tags.filter((t) => !['Rapide', 'Court', 'Moyen', 'Long', 'Très long'].includes(t)).slice(0, 4);
-  return `<article class="card" data-id="${v.id}">
+  const shownTags = tags.filter((t) => !['Rapide', 'Court', 'Moyen', 'Long', 'Très long'].includes(t)).slice(0, mini ? 2 : 4);
+  return `<article class="card ${mini ? 'mini' : ''}" data-id="${v.id}" ${shelf ? `data-shelf="${esc(shelf)}"` : ''}>
     <button class="thumb" data-act="open" aria-label="Lire">
       <img loading="lazy" src="${esc(thumbOf(v))}" alt="" onerror="this.style.visibility='hidden'">
+      ${num ? `<span class="num">${num}</span>` : ''}
       ${v.duration != null ? `<span class="dur">${formatDuration(v.duration)}</span>` : ''}
       ${v.progress > 0.02 ? `<span class="prog" style="width:${Math.round(v.progress * 100)}%"></span>` : ''}
     </button>
+    <button class="why-btn" data-act="why" title="Pourquoi cette vidéo ?" aria-label="Pourquoi cette vidéo ?">i</button>
     <div class="meta">
       <h3 data-act="open">${esc(v.title || 'Vidéo ' + v.id)}</h3>
       <button class="chan" data-act="channel">${esc(v.channelTitle || 'Chaîne inconnue')}</button>
       <div class="tags">${shownTags.map((t) => chip(t, { small: true })).join('')}</div>
     </div>
-    <button class="rm" data-act="queue" title="Retirer de la liste" aria-label="Retirer de la liste">✕</button>
+    ${mini ? '' : '<button class="rm" data-act="queue" title="Retirer de la liste" aria-label="Retirer de la liste">✕</button>'}
   </article>`;
 }
 
@@ -327,14 +408,73 @@ function toggleTagFilter(tag) {
   ui.limit = 60;
 }
 
+// ---------------------------------------------------------------- « Pourquoi cette vidéo ? »
+const ADJUSTABLE = new Set(['logiciel', 'techno', 'sujet', 'mood', 'categorie', 'perso']);
+
+function renderWhy(v, shelfId) {
+  const { score, reasons } = whyOf(v);
+  const c = getCtx();
+  const boosts = settings().boosts || {};
+  const sh = shelfId && ui.shelves?.[shelfId];
+  const key = channelKey(v, c);
+  const adjust = tagsOf(v).filter((t) => ADJUSTABLE.has(groupOfTag(t, c))).slice(0, 6).map((t) => ({ k: t, label: t }));
+  if (key) adjust.unshift({ k: 'ch:' + key, label: v.channelTitle || 'Cette chaîne' });
+  const sign = (w) => (w > 0 ? `+${String(w).replace('.', ',')}` : w < 0 ? `−${String(-w).replace('.', ',')}` : '•');
+  return `<div class="pick why">
+    <h3>Pourquoi cette vidéo ?</h3>
+    <p class="vt">${esc(v.title)}</p>
+    ${sh ? `<p class="shelfwhy"><b>${sh.icon} ${esc(sh.title)}</b> — ${esc(sh.why)}</p>` : ''}
+    <ul class="reasons">
+      ${reasons.length ? reasons.map((r) => `<li class="${r.w > 0 ? 'plus' : r.w < 0 ? 'minus' : 'neutral'}"><b>${sign(r.w)}</b><span>${esc(r.text)}</span></li>`).join('')
+        : '<li class="neutral"><b>•</b><span>Rien de particulier : ni créateur connu, ni thème habituel.</span></li>'}
+    </ul>
+    <p class="hint">Score « Pour moi » : <b>${String(Math.round(score * 10) / 10).replace('.', ',')}</b>. Les vidéos au score le plus haut remontent en premier.</p>
+    ${adjust.length ? `<h4>Plus ou moins de ça ?</h4>
+    <div class="adjust">${adjust.map((a) => {
+      const b = boosts[a.k] || 0;
+      return `<div class="adj" data-k="${esc(a.k)}">
+        <button class="ghost small" data-act="boost" data-d="-1" aria-label="Moins de ${esc(a.label)}">−</button>
+        <span>${esc(a.label)}${b ? ` <i class="${b > 0 ? 'plus' : 'minus'}">${b > 0 ? '+' : '−'}${Math.abs(b)}</i>` : ''}</span>
+        <button class="ghost small" data-act="boost" data-d="1" aria-label="Plus de ${esc(a.label)}">+</button>
+      </div>`;
+    }).join('')}</div>` : ''}
+    <div class="row"><button class="primary small" data-act="pickclose">OK</button></div>
+  </div>`;
+}
+
+function openWhy(id, shelfId) {
+  const v = st().videos[id];
+  if (!v) return;
+  const dlg = $('#picker');
+  dlg.dataset.video = id;
+  dlg.dataset.shelf = shelfId || '';
+  dlg.dataset.mode = 'why';
+  dlg.innerHTML = renderWhy(v, shelfId);
+  if (!dlg.open) dlg.showModal();
+}
+
+function applyBoost(k, d) {
+  const s = settings();
+  s.boosts ||= {};
+  const val = Math.max(-3, Math.min(3, (s.boosts[k] || 0) + d));
+  if (val) s.boosts[k] = val; else delete s.boosts[k];
+  store.changed('boost');
+  ctx = null;
+}
+
 // ---------------------------------------------------------------- lecteur
 let player = null;
 let current = null;
 let playlistsCache = null;
 
-function openVideo(id) {
+// session : liste d'ids lue dans l'ordre (rayon de l'accueil, enchaînement de la Liste)
+function openVideo(id, session) {
   const v = st().videos[id];
   if (!v) return;
+  if (session !== undefined) ui.session = session;
+  if (ui.session && !ui.session.ids.includes(id)) ui.session = null;
+  if (ui.session) ui.session.index = ui.session.ids.indexOf(id);
+  clearTimeout(autoNextTimer);
   current = v;
   const dlg = $('#video');
   const tags = tagsOf(v);
@@ -356,6 +496,7 @@ function openVideo(id) {
   <div class="vwrap">
     <div class="vtop">
       <button class="ghost" data-act="close" aria-label="Fermer">← Retour</button>
+      ${ui.session ? `<span class="sesspos">${ui.session.index + 1}/${ui.session.ids.length}</span>` : ''}
       <div class="speeds">${SPEEDS.map((s) => `<button class="speed ${s === (settings().defaultSpeed || 1) ? 'on' : ''}" data-act="speed" data-speed="${s}">×${String(s).replace('.', ',')}</button>`).join('')}</div>
     </div>
     <div class="frame"><div id="yt"></div></div>
@@ -369,6 +510,7 @@ function openVideo(id) {
       <div class="vactions">
         <button class="primary" data-act="done">✓ Vue, retirer de la liste</button>
         <button class="ghost" data-act="playlist">＋ Playlist…</button>
+        <button class="ghost" data-act="why-modal" title="Pourquoi cette vidéo ?">ⓘ Pourquoi ?</button>
         <a class="ghost btn" href="https://www.youtube.com/watch?v=${v.id}${v.progress > 0.02 && v.duration ? '&t=' + Math.floor(v.progress * v.duration) : ''}" target="_blank" rel="noopener">Ouvrir dans YouTube ↗</a>
       </div>
       <div class="vtags">
@@ -377,7 +519,8 @@ function openVideo(id) {
         <form class="addtag" data-act="addtag"><input list="alltags" placeholder="+ tag" aria-label="Ajouter un tag"><datalist id="alltags">${[...allTags].sort().map((t) => `<option value="${esc(t)}">`).join('')}</datalist></form>
       </div>
       ${v.desc ? `<p class="desc">${esc(v.desc)}…</p>` : ''}
-      ${similar.length ? `<h3>Dans le même genre</h3><div class="grid small">${similar.map(card).join('')}</div>` : ''}
+      ${upNext().length ? `<h3>Ensuite dans ta session</h3><div class="grid small">${upNext().map((o, i) => card(o, { num: ui.session.index + 2 + i })).join('')}</div>` : ''}
+      ${similar.length ? `<h3>Dans le même genre</h3><div class="grid small">${similar.map((o) => card(o)).join('')}</div>` : ''}
     </div>
   </div>`;
   if (!dlg.open) dlg.showModal();
@@ -408,15 +551,32 @@ function onWatched(v, frac) {
   showEndSheet(v, false);
 }
 
+let autoNextTimer = null;
+
+function upNext() {
+  if (!ui.session) return [];
+  return ui.session.ids.slice(ui.session.index + 1, ui.session.index + 4).map((id) => st().videos[id]).filter((o) => o && o.status === 'active');
+}
+
+function nextVideo(v) {
+  if (ui.session) {
+    const nxt = ui.session.ids.slice(ui.session.index + 1).map((id) => st().videos[id]).find((o) => o && o.status === 'active');
+    if (nxt) return { v: nxt, fromSession: true };
+  }
+  const c = getCtx();
+  const o = videosByStatus('active')
+    .filter((x) => x.id !== v.id)
+    .map((x) => [x, similarity(v, tagsOf(v), x, tagsOf(x), c)])
+    .sort((a, b) => b[1] - a[1])[0]?.[0];
+  return o ? { v: o, fromSession: false } : null;
+}
+
 function showEndSheet(v, ended) {
   const sheet = $('#endsheet');
   if (!sheet || current?.id !== v.id) return;
   if (v.status === 'active' && ended) queueRemoval(v.id, 'vue en entier');
-  const c = getCtx();
-  const next = videosByStatus('active')
-    .filter((o) => o.id !== v.id)
-    .map((o) => [o, similarity(v, tagsOf(v), o, tagsOf(o), c)])
-    .sort((a, b) => b[1] - a[1])[0]?.[0];
+  const nx = nextVideo(v);
+  const next = nx?.v;
   const last = settings().lastPlaylist;
   sheet.hidden = false;
   sheet.classList.toggle('full', ended);
@@ -426,12 +586,27 @@ function showEndSheet(v, ended) {
       ${v.status === 'queued' ? '<button class="ghost small" data-act="keep">Garder dans la liste</button>' : ''}
       ${last ? `<button class="ghost small" data-act="addlast">＋ ${esc(last.title)}</button>` : ''}
       <button class="ghost small" data-act="playlist">＋ Autre playlist…</button>
-      ${next ? `<button class="primary small" data-act="next" data-id="${next.id}">Suivante : ${esc(next.title.slice(0, 40))}${next.title.length > 40 ? '…' : ''} →</button>` : ''}
+      ${next ? `<button class="primary small" data-act="next" data-id="${next.id}">${nx.fromSession ? 'Suivante' : 'Dans le même genre'} : ${esc(next.title.slice(0, 40))}${next.title.length > 40 ? '…' : ''} →</button>` : ''}
       <button class="linkbtn" data-act="hidesheet">Masquer</button>
-    </div>`;
+    </div>
+    ${ended && nx?.fromSession ? '<p class="hint countdown">Suivante dans <b>5</b> s… <button class="linkbtn" data-act="stopauto">Annuler</button></p>' : ''}`;
+  // En session, la vidéo suivante démarre toute seule après 5 s.
+  if (ended && nx?.fromSession) {
+    let n = 5;
+    const tick = () => {
+      if (current?.id !== v.id) return;
+      const b = sheet.querySelector('.countdown b');
+      if (!b) return;
+      if (--n <= 0) { openVideo(next.id); return; }
+      b.textContent = n;
+      autoNextTimer = setTimeout(tick, 1000);
+    };
+    autoNextTimer = setTimeout(tick, 1000);
+  }
 }
 
 function closeVideo() {
+  clearTimeout(autoNextTimer);
   player?.destroy();
   player = null;
   current = null;
@@ -444,6 +619,7 @@ function closeVideo() {
 async function choosePlaylist(v) {
   if (!(await needAuth())) return;
   const dlg = $('#picker');
+  dlg.dataset.mode = 'playlist';
   dlg.innerHTML = '<div class="pick"><p>Chargement de tes playlists…</p></div>';
   dlg.showModal();
   try {
@@ -516,26 +692,53 @@ function syncUrl() {
   return 'https://www.youtube.com/playlist?list=WL#yc-sync' + (ids.length ? '=' + ids.join(',') : '');
 }
 
-function wlSteps() {
+const UA = navigator.userAgent;
+const IS_IOS = /iPad|iPhone|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_OPERA = /OPR\//.test(UA);
+const IS_EDGE = /Edg\//.test(UA);
+const IS_FIREFOX = /Firefox\//.test(UA);
+const IS_SAFARI_MAC = !IS_IOS && /Safari\//.test(UA) && !/Chrome|Chromium|OPR|Edg/.test(UA);
+
+function installSteps() {
+  if (IS_IOS) {
+    return `<ol class="steps">
+      <li>Installe l'app gratuite <a href="https://apps.apple.com/app/userscripts/id1463298887" target="_blank" rel="noopener"><b>Userscripts</b></a> depuis l'App Store et ouvre-la une fois.</li>
+      <li>Dans <b>Réglages iOS → Apps → Safari → Extensions → Userscripts</b>, active l'extension et autorise-la sur <b>youtube.com</b> (ou « Autres sites web : Autoriser »).</li>
+      <li>Dans Safari, ouvre <a class="bm" href="${USERSCRIPT_URL}" target="_blank" rel="noopener">⟳ Script Companion</a>, touche l'icône <b>Userscripts</b> (ou « aA ») dans la barre d'adresse, puis <b>Install</b>.</li>
+    </ol>`;
+  }
+  const ext = IS_FIREFOX ? 'addons.mozilla.org' : IS_EDGE ? 'Edge Add-ons' : IS_SAFARI_MAC ? 'l\'App Store (version Safari)' : 'le Chrome Web Store';
+  const page = IS_OPERA ? 'opera://extensions' : IS_EDGE ? 'edge://extensions' : 'chrome://extensions';
+  return `<ol class="steps">
+    <li>Installe l'extension <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener"><b>Tampermonkey</b></a> (depuis ${ext}).</li>
+    ${IS_FIREFOX || IS_SAFARI_MAC ? '' : `<li><b>Important</b> : ouvre <code>${page}</code>, active le <b>Mode développeur</b> (en haut à droite), puis dans <b>Détails</b> de Tampermonkey active <b>« Autoriser les scripts utilisateur »</b>. Redémarre le navigateur.</li>`}
+    <li>Ouvre <a class="bm" href="${USERSCRIPT_URL}" target="_blank" rel="noopener">⟳ Script Companion</a> : Tampermonkey affiche une page d'installation, clique sur <b>Installer</b>.</li>
+  </ol>`;
+}
+
+function syncSteps() {
   const q = videosByStatus('queued').length;
-  return `<h3>Synchro automatique <small>(recommandé)</small></h3>
-  <ol class="steps">
-    <li>Installe une extension de scripts :
-      <b>iPhone/iPad</b> : <a href="https://apps.apple.com/app/userscripts/id1463298887" target="_blank" rel="noopener">Userscripts</a> (gratuite), puis active-la dans Réglages → Safari → Extensions, autorisée sur youtube.com.
-      <b>Ordinateur</b> : <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>.</li>
-    <li>Installe le script : <a class="bm" href="${USERSCRIPT_URL}" target="_blank" rel="noopener">⟳ Script Companion</a>
-      <small>(sur iPhone : ouvre le lien dans Safari, touche l'icône Userscripts dans la barre d'adresse puis « Install »)</small></li>
-    <li>Touche <b>⟳ Synchroniser</b> ci-dessous : tu arrives sur ta page « À regarder plus tard » de YouTube.</li>
-    <li>Là, ne touche à rien : un panneau sombre apparaît en bas de la page et ${q ? `retire les ${q} vidéo(s) marquée(s), puis ` : ''}compte tes vidéos (quelques secondes).</li>
-    <li>Quand il affiche « ✓ … vidéos récupérées », touche <b>Envoyer à Companion</b> dans ce panneau : Companion se rouvre avec ta liste à jour.</li>
+  return `<ol class="steps">
+    <li>Touche <b>⟳ Synchroniser</b> : ta page « À regarder plus tard » de YouTube s'ouvre.</li>
+    <li>Ne touche à rien : un <b>panneau sombre</b> apparaît en bas de la page, ${q ? `retire les ${q} vidéo(s) marquée(s), puis ` : ''}compte tes vidéos (quelques secondes).</li>
+    <li>Quand il affiche « ✓ … vidéos récupérées », touche <b>Envoyer à Companion</b> : Companion s'ouvre avec ta liste à jour.</li>
   </ol>
   <div class="row">
     <a class="primary btn" href="${syncUrl()}" data-act="syncyt">⟳ Synchroniser${q ? ` (et retirer ${q})` : ''}</a>
     <button class="ghost small" data-act="paste">Coller depuis le presse-papiers</button>
   </div>
-  <p class="hint">Sur iPhone, si l'app YouTube s'ouvre à la place de Safari : appui long sur « Synchroniser » → « Ouvrir dans un nouvel onglet ». Si l'envoi n'arrive pas, utilise « Copier » dans le script puis « Coller » ici.</p>
+  <p class="hint">${IS_IOS ? 'Si l\'app YouTube s\'ouvre à la place de Safari : appui long sur « Synchroniser » → « Ouvrir dans un nouvel onglet ». ' : ''}Pas de panneau sur YouTube ? Le script n'est pas actif : revois l'installation. L'envoi n'arrive pas ? Touche « Copier » dans le panneau, puis « Coller » ici.</p>`;
+}
+
+function wlSteps() {
+  return `<h3>Synchro</h3>
+  ${syncSteps()}
   <details class="manual">
-    <summary>Autres méthodes (fichier, favori)</summary>
+    <summary>Installer le script ${IS_IOS ? '(iPhone / iPad)' : '(ordinateur)'}</summary>
+    ${installSteps()}
+  </details>
+  <details class="manual">
+    <summary>Sans script (fichier, favori)</summary>
     <ol class="steps">
       <li>Sur ordinateur, glisse ce bouton dans ta barre de favoris : ${bookmarkletBlock('export', '')}</li>
       <li>Ouvre <a href="https://www.youtube.com/playlist?list=WL" target="_blank" rel="noopener">youtube.com/playlist?list=WL</a> et clique sur le favori : un fichier JSON est téléchargé.</li>
@@ -573,17 +776,17 @@ function googleBlock() {
 function renderImport() {
   const h = st().history;
   return `<section class="panel">
-    <h2>1. Ta liste « À regarder plus tard »</h2>
-    <p class="hint">Dernier import : ${fmtDate(st().wlImportedAt)}</p>
+    <h2>Ta liste « À regarder plus tard »</h2>
+    <p class="hint">Dernière synchro : ${fmtDate(st().wlImportedAt)}</p>
     ${wlSteps()}
   </section>
   <section class="panel">
-    <h2>2. Ton historique</h2>
-    <p class="hint">${h.total ? `${h.total} visionnages importés le ${fmtDate(h.importedAt)}` : 'Pas encore importé.'} Il sert à repérer tes créateurs habituels, les « Aliens », les vidéos déjà vues et tes thèmes favoris.</p>
+    <h2>Ton historique <small>(optionnel)</small></h2>
+    <p class="hint">${h.total ? `${h.total} visionnages importés le ${fmtDate(h.importedAt)}.` : 'Pas encore importé.'} Il sert à repérer tes créateurs habituels, les « Aliens », les vidéos déjà vues et tes thèmes favoris.</p>
     ${historySteps()}
   </section>
   <section class="panel">
-    <h2>3. Infos YouTube</h2>
+    <h2>Infos YouTube</h2>
     ${googleBlock()}
   </section>`;
 }
@@ -617,7 +820,6 @@ async function runEnrich(all = false) {
     const subs = await syncSubscriptions();
     const r = await enrichVideos({ all, onProgress: (d, t) => say(`Infos vidéos : ${d} / ${t}`) });
     toast(`${subs} abonnements, ${r.done} vidéos mises à jour${r.missing ? `, ${r.missing} indisponibles` : ''}`);
-    if (ui.view === 'setup') { ui.setupStep++; }
     render();
   } catch (e) {
     say('Erreur : ' + esc(e.message));
@@ -705,38 +907,40 @@ function toggleChannelList(listName, id) {
 }
 
 // ---------------------------------------------------------------- configuration guidée
-const SETUP_STEPS = ['Bienvenue', 'Ta liste', 'Ton historique', 'Infos YouTube', 'Tes goûts'];
+const SETUP_STEPS = ['Le script', 'Ta liste', 'Tes goûts'];
+const setupStep = () => Math.min(settings().setupStep || 0, SETUP_STEPS.length - 1);
+function setSetupStep(n) { settings().setupStep = Math.max(0, Math.min(n, SETUP_STEPS.length - 1)); store.changed('settings'); }
 
 function renderSetup() {
-  const i = ui.setupStep;
-  const s = settings();
-  const nVideos = Object.keys(st().videos).length;
+  const i = setupStep();
+  const nVideos = videosByStatus('active', 'queued').length;
   let body = '';
   if (i === 0) {
-    body = `<h2>Range enfin ta liste « À regarder plus tard »</h2>
-      <p>YouTube Companion importe ta liste et ton historique, tague chaque vidéo (durée, créateur, sujet, logiciel, format…) et t'aide à choisir quoi regarder. Quand une vidéo est vue à plus de ${Math.round(s.watchedThreshold * 100)} %, elle sort de la liste.</p>
-      <p class="hint">Tes données restent dans ton navigateur (et, si tu le souhaites, dans un dossier caché de ton Google Drive). Rien n'est envoyé ailleurs.</p>
-      ${clientId() ? '' : `<label class="field">Client ID Google (voir README)<input id="clientId" placeholder="xxxx.apps.googleusercontent.com" value="${esc(s.clientId)}"></label>`}
-      <div class="row">${auth.signedIn ? `<p>✓ Connecté : ${esc(auth.user?.title || '')}</p>` : '<button class="primary" data-act="signin">Se connecter avec Google</button>'}</div>`;
+    body = `<h2>Bienvenue ${esc((auth.user?.title || '').split(' ')[0])} 👋</h2>
+      <p>YouTube ne laisse aucune app lire « À regarder plus tard ». Pour la récupérer, Companion s'appuie sur un petit script qui tourne sur youtube.com, dans ton navigateur. Il ne s'installe qu'une fois.</p>
+      <p class="hint">${IS_IOS ? 'Tu es sur iPhone / iPad : voici la marche à suivre dans Safari.' : 'Tu es sur ordinateur : voici la marche à suivre.'}</p>
+      ${installSteps()}`;
   } else if (i === 1) {
-    body = `<h2>Importe ta liste</h2>${nVideos ? `<p>✓ ${nVideos} vidéos importées.</p>` : ''}${wlSteps()}`;
-  } else if (i === 2) {
-    const h = st().history;
-    body = `<h2>Importe ton historique <small>(optionnel mais conseillé)</small></h2>
-      <p>C'est ce qui permet de repérer tes créateurs préférés, les « Aliens » et les vidéos déjà vues. L'export Takeout peut prendre de quelques minutes à quelques heures : tu peux passer cette étape et revenir plus tard dans Import.</p>
-      ${h.total ? `<p>✓ ${h.total} visionnages importés.</p>` : ''}${historySteps()}`;
-  } else if (i === 3) {
-    body = `<h2>Récupère les infos des vidéos</h2>${googleBlock()}`;
+    body = nVideos
+      ? `<h2>✓ ${nVideos.toLocaleString('fr-FR')} vidéos reçues</h2>
+         <p>Companion récupère maintenant leurs durées, catégories et tags YouTube${Object.values(st().videos).some((v) => !v.enriched) ? '… <span class="spin">⟳</span>' : '.'}</p>
+         <p class="hint">Tu peux continuer : ça se termine en arrière-plan.</p>`
+      : `<h2>Synchronise ta liste</h2>${syncSteps()}`;
   } else {
-    body = renderTasteQuestions();
+    body = renderTasteQuestions() + `<details class="manual">
+      <summary>Encore mieux : importe ton historique YouTube (optionnel, possible plus tard dans Réglages)</summary>
+      <p class="hint">L'historique permet de repérer tes créateurs préférés, les « Aliens » et les vidéos déjà vues. Google met de quelques minutes à quelques heures à préparer l'export.</p>
+      ${historySteps()}
+    </details>`;
   }
+  const canNext = i !== 1 || nVideos;
   return `<section class="setup">
-    <ol class="progress">${SETUP_STEPS.map((l, k) => `<li class="${k === i ? 'on' : ''} ${k < i ? 'done' : ''}">${l}</li>`).join('')}</ol>
+    <ol class="progress">${SETUP_STEPS.map((l, k) => `<li class="${k === i ? 'on' : ''} ${k < i ? 'done' : ''}">${k + 1}. ${l}</li>`).join('')}</ol>
     <div class="panel">${body}</div>
     <div class="row setupnav">
       ${i > 0 ? '<button class="ghost" data-act="setup-prev">← Précédent</button>' : '<span></span>'}
       ${i < SETUP_STEPS.length - 1
-        ? `<button class="primary" data-act="setup-next">${(i === 1 && !nVideos) || i === 2 || i === 3 ? 'Passer / continuer →' : 'Continuer →'}</button>`
+        ? `<button class="${canNext ? 'primary' : 'ghost'}" data-act="setup-next">${i === 0 ? 'C\'est installé →' : canNext ? 'Continuer →' : 'Passer →'}</button>`
         : '<button class="primary" data-act="setup-done">C\'est parti !</button>'}
     </div>
   </section>`;
@@ -861,7 +1065,44 @@ document.addEventListener('click', async (e) => {
   switch (act) {
     case 'signin': await signIn(); render(); break;
     case 'signout': if (await confirmBox('Se déconnecter de Google ?')) { auth.signOut(); ui.unlocked = false; render(); } break;
-    case 'open': if ($('#video').open) { player?.destroy(); } openVideo(id); break;
+    case 'open': {
+      if ($('#video').open) { player?.destroy(); openVideo(id); break; }
+      // La lecture suit l'ordre du rayon ou de l'enchaînement d'où l'on vient.
+      const shelfId = cardEl?.dataset.shelf;
+      let ids = null;
+      if (shelfId && ui.shelves?.[shelfId]) ids = ui.shelves[shelfId].items.map((it) => it.v.id);
+      else if (ui.view === 'library') ids = currentSequence().items.map((v) => v.id);
+      openVideo(id, ids ? { ids, index: ids.indexOf(id) } : null);
+      break;
+    }
+    case 'why': e.stopPropagation(); openWhy(id, cardEl?.dataset.shelf); break;
+    case 'why-modal': if (current) openWhy(current.id); break;
+    case 'boost': {
+      const k = el.closest('[data-k]').dataset.k;
+      applyBoost(k, Number(el.dataset.d));
+      const dlg = $('#picker');
+      dlg.innerHTML = renderWhy(st().videos[dlg.dataset.video], dlg.dataset.shelf);
+      break;
+    }
+    case 'budget': ui.budget = Number(el.dataset.b); render(); break;
+    case 'playall': {
+      const ids = currentSequence().items.map((v) => v.id);
+      if (ids.length) openVideo(ids[0], { ids, index: 0 });
+      break;
+    }
+    case 'shelf-all': shelfToList(ui.shelves[el.closest('[data-shelf]').dataset.shelf]); break;
+    case 'shelf-clean': {
+      const sh = ui.shelves[el.closest('[data-shelf]').dataset.shelf];
+      const list = videosByStatus('active').filter((v) => sh.filters.every((f) => matchesFilter(v, tagsOf(v), f, channelHelpers)));
+      if (await confirmBox(`Retirer ces ${list.length} vidéos de ta liste ? (Annulable depuis « À retirer »)`)) {
+        list.forEach((v) => queueRemoval(v.id, sh.title));
+        render();
+        toast(`${list.length} vidéos ajoutées à « À retirer »`);
+      }
+      break;
+    }
+    case 'unfilter-i': ui.filters.splice(Number(el.dataset.i), 1); render(); break;
+    case 'stopauto': clearTimeout(autoNextTimer); el.closest('.countdown')?.remove(); break;
     case 'queue': {
       queueRemoval(id, 'manuel');
       render();
@@ -870,6 +1111,8 @@ document.addEventListener('click', async (e) => {
     }
     case 'unqueue': unqueue(id); render(); break;
     case 'tag': {
+      if ($('#video').open) closeVideo();
+      if (ui.view !== 'library') { ui.filters = []; ui.listTitle = ''; }
       toggleTagFilter(el.dataset.tag);
       if (ui.view !== 'library') ui.view = 'library';
       render();
@@ -890,7 +1133,7 @@ document.addEventListener('click', async (e) => {
     case 'tag-modal': closeVideo(); ui.filters = [{ type: 'tag', value: el.dataset.tag }]; go('library'); break;
     case 'toggletag': toggleManualTag(current.id, el.dataset.tag, el.dataset.auto === '1'); refreshModalTags(); break;
     case 'panel': ui.panel = !ui.panel; render(); break;
-    case 'clear': ui.filters = []; ui.search = ''; render(); break;
+    case 'clear': ui.filters = []; ui.search = ''; ui.listTitle = ''; render(); break;
     case 'more': ui.limit += 60; render(); break;
     case 'surprise': {
       const list = currentList();
@@ -962,11 +1205,11 @@ document.addEventListener('click', async (e) => {
     }
     case 'resetrules': if (await confirmBox('Revenir aux règles par défaut ?')) { st().rules = null; store.changed('rules'); render(); } break;
     case 'backup': downloadBackup(); break;
-    case 'rerunsetup': ui.setupStep = 0; go('setup'); break;
+    case 'rerunsetup': settings().setupDone = false; setSetupStep(0); go('setup'); break;
     case 'reset': if (await confirmBox('Effacer toutes les données de cet appareil ? (La copie Google Drive n\'est pas supprimée.)')) { await store.reset(); go('setup'); } break;
-    case 'setup-prev': ui.setupStep = Math.max(0, ui.setupStep - 1); render(); break;
-    case 'setup-next': ui.setupStep++; render(); break;
-    case 'setup-done': settings().setupDone = true; store.changed('settings'); go('library'); break;
+    case 'setup-prev': setSetupStep(setupStep() - 1); render(); break;
+    case 'setup-next': setSetupStep(setupStep() + 1); render(); break;
+    case 'setup-done': settings().setupDone = true; store.changed('settings'); go('home'); break;
     default: break;
   }
 });
@@ -1012,7 +1255,7 @@ function applyPayload(payload, how) {
   if (Object.values(st().videos).some((v) => !v.enriched) && auth.signedIn) {
     enrichVideos().then(() => render()).catch(() => {});
   }
-  if (ui.view === 'setup' && ui.setupStep === 1) ui.setupStep = 2;
+  if (!settings().setupDone) { setSetupStep(1); ui.view = 'setup'; }
   render();
 }
 
@@ -1047,6 +1290,14 @@ async function pasteFromClipboard() {
   } catch (e) { toast('Collage impossible : ' + e.message); }
 }
 
+// Fermer la bulle « Pourquoi » rafraîchit la vue : les +/− ont pu changer l'ordre.
+$('#picker').addEventListener('close', () => {
+  const dlg = $('#picker');
+  if (dlg.dataset.mode === 'why') { dlg.dataset.mode = ''; if (!$('#video').open) render(); }
+});
+// Clic à côté de la bulle = fermer
+$('#picker').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+
 // Fermeture du lecteur avec Échap / geste retour
 $('#video').addEventListener('cancel', (e) => { e.preventDefault(); closeVideo(); });
 
@@ -1055,12 +1306,12 @@ $('#video').addEventListener('cancel', (e) => { e.preventDefault(); closeVideo()
   await store.load();
   auth.restore();
   listenForScript();
-  if (!settings().setupDone && !Object.keys(st().videos).length) ui.view = 'setup';
+  if (!settings().setupDone) ui.view = 'setup';
   render();
   if (auth.signedIn) pullSync();
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
-  window.__yc = { store, ui, render }; // pratique pour déboguer
+  window.__yc = { store, ui, render, applyPayload }; // pratique pour déboguer (et les tests)
 })();
 

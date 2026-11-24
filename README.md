@@ -10,19 +10,20 @@ Statique (HTML/CSS/JS sans build), hébergée sur GitHub Pages. Tes données res
 
 ## Fonctionnalités
 
+- **Accueil = curation automatique**, présentée en rayons : À reprendre, un rayon selon l'heure (Pour le café, Pause déj, Pour la soirée…), Pour toi, Vite vu, Tes créateurs préférés, Tes habitués, tes thèmes (Godot, Figurines…), Les Aliens, Apprendre, À méditer, Détente, Fraîchement publiées, Déjà vues ? (à vider d'un geste)
+- **Liste = enchaînement** : « J'ai 15 min / 30 min / 1 h / 2 h » compose une session de vidéos variées (jamais deux fois la même chaîne d'affilée), lue à la suite avec un compte à rebours entre deux vidéos
+- **ⓘ Pourquoi cette vidéo ?** sur chaque vignette : le détail des **+** et des **−** qui la font remonter (créateur, thèmes habituels, centres d'intérêt, déjà vue…), avec des boutons **+ / −** pour en demander plus ou moins (par thème ou par chaîne)
 - **Tags automatiques**
   - *Durée* : Short, Rapide (moins de 5 min, réglable), Court, Moyen, Long, Très long
   - *Créateur* : Créateur préféré (abonné et souvent regardé, ou choisi à la main), Abonné, Habitué, **Alien** (chaîne jamais regardée)
-  - *Statut* : Déjà vue (présente dans l'historique), Commencée, Indisponible, Récente, Vieille de la liste
+  - *Statut* : Déjà vue (présente dans l'historique), Commencée, Indisponible, Récente
   - *Logiciel, Techno, Sujet, Format/mood* : règles par mots-clés (Blender, Godot, Unity, IA, Raspberry Pi, pixel art, figurines, tuto, video essay, ASMR…), entièrement modifiables dans Réglages
   - *Catégorie YouTube*
 - **Tags perso** à ajouter sur n'importe quelle vidéo, et tags auto masquables vidéo par vidéo
 - **Filtres** : touche un tag pour filtrer, une 2ᵉ fois pour l'exclure (ex. « Rapide » sans « Tuto »), clic sur une chaîne pour ne voir qu'elle
-- **Tri « Pour moi »** : créateurs regardés souvent, thèmes fréquents dans ton historique et centres d'intérêt choisis
-- **Lecteur intégré** avec vitesses et reprise là où tu t'étais arrêté
-- **Fin de vidéo** : retrait automatique à 80 % (réglable), ajout à une playlist (la dernière utilisée en un clic), vidéo similaire suivante
-- **Retrait groupé** : par exemple, filtre « Déjà vue » puis « Retirer ces N vidéos »
-- **Configuration guidée** au premier lancement
+- **Lecteur intégré** avec vitesses ×1 à ×2 et reprise là où tu t'étais arrêté
+- **Fin de vidéo** : retrait automatique à 80 % (réglable), ajout à une playlist (la dernière utilisée en un clic), vidéo suivante
+- **Configuration guidée** en 3 étapes (script, synchro, goûts), adaptée à l'appareil (iPhone ou ordinateur)
 - Installable sur l'écran d'accueil (PWA)
 
 ## Pourquoi un script ?
@@ -91,7 +92,8 @@ index.html            page unique
 css/app.css           styles
 js/app.js             interface (vues, lecteur, configuration guidée)
 js/data.js            imports, enrichissement, file de retrait
-js/tagger.js          règles de tags, pertinence, similarité
+js/tagger.js          règles de tags, score « Pour moi » et ses raisons (+/−), similarité
+js/curation.js        rayons de l'accueil et enchaînements de la Liste
 js/importers.js       lecture des fichiers (JSON favori, CSV Takeout, historique)
 js/google.js          connexion Google, YouTube Data API, synchro Drive
 js/player.js          lecteur YouTube intégré (vitesse, progression)

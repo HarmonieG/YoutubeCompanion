@@ -83,8 +83,8 @@ await app.evaluate(async () => {
   await store.persistNow();
 });
 await app.reload();
-await app.waitForSelector('[data-go=import]');
-await app.click('[data-go=import]');
+await app.waitForSelector('[data-go=settings]');
+await app.click('[data-go=settings]');
 const syncHref = await app.getAttribute('[data-act=syncyt]', 'href');
 console.log('lien de synchro', syncHref);
 await app.screenshot({ path: `${OUT}/20-import-sync.png`, fullPage: true });
@@ -121,7 +121,7 @@ console.log('ancien onglet', (await app.locator('#nav').innerText()).replace(/\n
 // 5) Repli presse-papiers
 await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
 await popup.evaluate((p) => navigator.clipboard.writeText(JSON.stringify(p)), { source: 'plustard-wl', items: [{ id: 'zzzzzzzzzzz', title: 'collée', duration: 30 }] });
-await popup.click('[data-go=import]');
+await popup.click('[data-go=settings]');
 await popup.click('[data-act=paste]');
 await popup.waitForSelector('text=Import :', { timeout: 5000 });
 console.log('collage OK');

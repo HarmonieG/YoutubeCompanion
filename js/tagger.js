@@ -203,22 +203,45 @@ export function historyAffinity(entries, compiled) {
   return out;
 }
 
-// Score « Pour moi » : affinité créateur + thèmes habituels + centres d'intérêt.
-export function relevance(video, tags, ctx) {
+// Score « Pour moi », avec le détail des raisons (+ / −) affiché dans la bulle ⓘ.
+export const BOOST_STEP = 2;
+const plural = (n, w) => `${n} ${w}${n > 1 ? 's' : ''}`;
+
+export function explain(video, tags, ctx) {
+  const reasons = [];
+  const add = (w, text) => reasons.push({ w: Math.round(w * 10) / 10, text });
+  const s = ctx.state.settings;
+  const boosts = s.boosts || {};
   const c = channelOf(video, ctx);
   const views = c ? c.views || 0 : 0;
-  let score = Math.log2(1 + views) * 1.5;
-  if (tags.includes('Créateur préféré')) score += 4;
-  else if (tags.includes('Abonné')) score += 1.5;
+  const chanName = video.channelTitle || c?.title || 'cette chaîne';
+
+  if (tags.includes('Créateur préféré')) add(4, 'Un de tes créateurs préférés');
+  else if (tags.includes('Abonné')) add(1.5, 'Tu es abonné à cette chaîne');
+  if (views) add(Math.log2(1 + views) * 1.5, `Tu as regardé ${plural(views, 'vidéo')} de ${chanName}`);
+  if (tags.includes('Alien')) add(0, 'Alien : une chaîne que tu n\'as jamais regardée');
+
   const aff = ctx.state.history.tagAffinity || {};
   for (const t of tags) {
-    if (aff[t]) score += Math.min(3, aff[t] * 40);
-    if (ctx.interests.has(t)) score += 3;
+    if (aff[t] && aff[t] * 40 >= 0.3) add(Math.min(3, aff[t] * 40), `Thème que tu regardes souvent : ${t}`);
+    if (ctx.interests.has(t)) add(3, `Centre d'intérêt : ${t}`);
+    if (boosts[t]) add(boosts[t] * BOOST_STEP, boosts[t] > 0 ? `Tu as demandé plus de « ${t} »` : `Tu as demandé moins de « ${t} »`);
   }
-  if (tags.includes('Commencée')) score += 2;
-  if (tags.includes('Indisponible')) score -= 10;
-  if (tags.includes('Déjà vue')) score -= 2;
-  return score;
+  const key = channelKey(video, ctx);
+  const cb = key && boosts['ch:' + key];
+  if (cb) add(cb * BOOST_STEP, cb > 0 ? `Tu as demandé plus de ${chanName}` : `Tu as demandé moins de ${chanName}`);
+
+  if (tags.includes('Commencée')) add(2, `Déjà commencée (${Math.round((video.progress || 0) * 100)} %)`);
+  if (tags.includes('Récente')) add(0.5, 'Publiée il y a moins d\'un mois');
+  if (tags.includes('Déjà vue')) add(-2, 'Présente dans ton historique : peut-être déjà vue');
+  if (tags.includes('Indisponible')) add(-10, 'Vidéo supprimée ou devenue privée');
+
+  reasons.sort((a, b) => Math.abs(b.w) - Math.abs(a.w));
+  return { score: reasons.reduce((t, r) => t + r.w, 0), reasons };
+}
+
+export function relevance(video, tags, ctx) {
+  return explain(video, tags, ctx).score;
 }
 
 const SIMILAR_WEIGHT = { logiciel: 3, techno: 2.5, sujet: 2, mood: 1, categorie: 0.5, perso: 2.5, createur: 0, duree: 0, statut: 0 };

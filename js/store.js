@@ -12,6 +12,8 @@ export const DEFAULT_SETTINGS = {
   favChannels: [],        // ids de chaînes ajoutées à la main
   bannedChannels: [],     // chaînes marquées « jamais préféré »
   interests: [],          // tags mis en avant (boost de pertinence)
+  boosts: {},             // « plus / moins de ça » : tag ou 'ch:<chaîne>' -> -3..+3
+  setupStep: 0,
   defaultSpeed: 1,
   setupDone: false,
   sync: true,
