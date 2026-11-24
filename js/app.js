@@ -2,13 +2,13 @@ import { store } from './store.js';
 import { GOOGLE_CLIENT_ID } from './config.js';
 import {
   GROUPS, DEFAULT_RULES, buildContext, videoTags, autoTags, groupOfTag, explain, similarity, creatorTag,
-  formatDuration, normalizeText, channelKey, channelOf, fmtMinutes,
+  formatDuration, normalizeText, channelKey, channelOf, fmtMinutes, seenReason, seenCertainty,
 } from './tagger.js';
 import { buildShelves, buildSequence, matchesFilter } from './curation.js';
 import { parseWatchLater, parseHistory, readFileText } from './importers.js';
 import {
   importWatchLater, importHistory, syncSubscriptions, enrichVideos, queueRemoval, unqueue,
-  markPurged, setProgress, toggleManualTag, recordView, weightHistoryByDuration, historyDurationsTodo, addManualTag, videosByStatus, rulesToText, textToRules,
+  markPurged, setProgress, toggleManualTag, recordView, keepVideo, weightHistoryByDuration, historyDurationsTodo, addManualTag, videosByStatus, rulesToText, textToRules,
 } from './data.js';
 import { auth, driveLoad, driveSave, fetchMyPlaylists, addToPlaylist, createPlaylist } from './google.js';
 import { Player } from './player.js';
@@ -56,7 +56,16 @@ function whyOf(v) {
 const scoreOf = (v) => whyOf(v).score;
 const channelHelpers = {
   channelMatches: (v, f) => channelKey(v, getCtx()) === f.value || (!channelKey(v, getCtx()) && v.channelTitle === f.label),
+  certainty: (v) => (seenCertainty(v, getCtx()) || (tagsOf(v).includes('Indisponible') ? 2.5 : 0)),
 };
+
+// Vidéos encore dans « À regarder plus tard » mais déjà vues (ou indisponibles), sauf celles gardées.
+function removalSuggestions() {
+  return videosByStatus('active')
+    .filter((v) => !v.keep && (tagsOf(v).includes('Déjà vue') || tagsOf(v).includes('Indisponible')))
+    .map((v) => ({ v, certainty: channelHelpers.certainty(v), reason: tagsOf(v).includes('Indisponible') ? 'Vidéo supprimée ou devenue privée' : seenReason(v, getCtx()) }))
+    .sort((a, b) => b.certainty - a.certainty);
+}
 function tagsOf(v) {
   getCtx();
   let t = tagCache.get(v.id);
@@ -191,10 +200,11 @@ function renderLogin() {
 function renderHeader() {
   const q = videosByStatus('queued').length;
   const a = videosByStatus('active').length;
+  const sugN = settings().setupDone ? removalSuggestions().length : 0;
   $('#nav').innerHTML = ui.view === 'setup' ? '' : [
     ['home', 'Accueil'],
     ['library', `Liste <small>${a}</small>`],
-    ['queue', `À retirer ${q ? `<small class="hot">${q}</small>` : ''}`],
+    ['queue', `À retirer ${q ? `<small class="hot">${q}</small>` : ''}${sugN ? `<small class="sugn" title="Déjà vues encore dans la liste">+${sugN}</small>` : ''}`],
     ['settings', 'Réglages'],
   ].map(([v, l]) => `<button class="${ui.view === v ? 'on' : ''}" data-go="${v}">${l}</button>`).join('');
   const syncIcon = { off: '', idle: '☁︎', saving: '⟳', error: '⚠︎' }[auth.signedIn && settings().sync ? syncState : 'off'];
@@ -648,15 +658,36 @@ async function addTo(pl, title, videoId) {
 }
 
 // ---------------------------------------------------------------- file de retrait
+function renderSuggestions() {
+  const sug = removalSuggestions();
+  if (!sug.length) return '';
+  const sure = sug.filter((x) => x.certainty >= 2).length;
+  const label = { 3: 'Vue', 2.5: 'Indisponible', 2: 'Vue', 1: 'Probable' };
+  return `<section class="panel">
+    <h2>🧹 Déjà vues, mais encore dans « À regarder plus tard »</h2>
+    <p>${sug.length} vidéo${sug.length > 1 ? 's' : ''}${sure ? `, dont <b>${sure}</b> sûre${sure > 1 ? 's' : ''} (barre de progression YouTube, lecture dans Companion ou vidéo indisponible)` : ''}. Les autres apparaissent dans ton historique : tu les as au moins ouvertes.</p>
+    <div class="row">
+      ${sure ? `<button class="primary small" data-act="sug-all" data-min="2">Retirer les ${sure} sûres</button>` : ''}
+      <button class="${sure ? 'ghost' : 'primary'} small" data-act="sug-all" data-min="0">Tout retirer (${sug.length})</button>
+    </div>
+  </section>
+  <section class="qlist sug">${sug.slice(0, 200).map(({ v, certainty, reason }) => `<div class="qrow" data-id="${v.id}">
+      <img loading="lazy" src="${esc(thumbOf(v))}" alt="" onerror="this.style.visibility='hidden'">
+      <div><b data-act="open">${esc(v.title || v.id)}</b><small><span class="cert c${String(certainty).replace('.', '')}">${label[certainty] || ''}</span> ${esc(reason)}</small></div>
+      <button class="ghost small" data-act="keep-sug">Garder</button>
+      <button class="primary small" data-act="queue-sug">Retirer</button>
+    </div>`).join('')}${sug.length > 200 ? `<p class="hint">… et ${sug.length - 200} autres.</p>` : ''}</section>`;
+}
+
 function renderQueue() {
   const q = videosByStatus('queued').sort((a, b) => (b.queuedAt || 0) - (a.queuedAt || 0));
   const removed = videosByStatus('removed').length;
-  return `<section class="panel">
-    <h2>À retirer de YouTube</h2>
+  return renderSuggestions() + `<section class="panel">
+    <h2>Prêtes à être retirées de YouTube ${q.length ? `<small>${q.length}</small>` : ''}</h2>
     <p>Ces vidéos sont masquées dans l'app. Elles seront retirées de « À regarder plus tard » à la prochaine synchro, grâce au script Companion.</p>
     <div class="row">
       <a class="primary btn ${q.length ? '' : 'disabled'}" href="${syncUrl()}" data-act="syncyt">⟳ Synchroniser et retirer (${q.length})</a>
-      <button class="linkbtn" data-go="import">Installer le script</button>
+      <button class="linkbtn" data-go="settings">Installer le script</button>
     </div>
     <details class="manual">
       <summary>Sans le script (favori sur ordinateur)</summary>
@@ -1129,9 +1160,39 @@ document.addEventListener('click', async (e) => {
       if (ids.length) openVideo(ids[0], { ids, index: 0 });
       break;
     }
-    case 'shelf-all': shelfToList(ui.shelves[el.closest('[data-shelf]').dataset.shelf]); break;
+    case 'shelf-all': {
+      const sh = ui.shelves[el.closest('[data-shelf]').dataset.shelf];
+      if (sh.suggestions) go('queue'); else shelfToList(sh);
+      break;
+    }
+    case 'keep-sug': keepVideo(id); render(); toast('Gardée : elle ne sera plus proposée au retrait'); break;
+    case 'queue-sug': {
+      queueRemoval(id, seenReason(st().videos[id], getCtx()) || 'déjà vue');
+      render();
+      toast('Ajoutée à « À retirer »', { label: 'Annuler', fn: () => { unqueue(id); st().videos[id].keep = false; render(); } });
+      break;
+    }
+    case 'sug-all': {
+      const min = Number(el.dataset.min);
+      const list = removalSuggestions().filter((x) => x.certainty >= min);
+      if (await confirmBox(`Retirer ces ${list.length} vidéos de ta liste ? Elles partiront de YouTube à la prochaine synchro.`)) {
+        list.forEach(({ v, reason }) => queueRemoval(v.id, reason || 'déjà vue'));
+        render();
+        toast(`${list.length} vidéos prêtes à être retirées`);
+      }
+      break;
+    }
     case 'shelf-clean': {
       const sh = ui.shelves[el.closest('[data-shelf]').dataset.shelf];
+      if (sh.suggestions) {
+        const list = removalSuggestions();
+        if (await confirmBox(`Retirer ces ${list.length} vidéos de ta liste ? Elles partiront de YouTube à la prochaine synchro.`)) {
+          list.forEach(({ v, reason }) => queueRemoval(v.id, reason || 'déjà vue'));
+          render();
+          toast(`${list.length} vidéos prêtes à être retirées`);
+        }
+        break;
+      }
       const list = videosByStatus('active').filter((v) => sh.filters.every((f) => matchesFilter(v, tagsOf(v), f, channelHelpers)));
       if (await confirmBox(`Retirer ces ${list.length} vidéos de ta liste ? (Annulable depuis « À retirer »)`)) {
         list.forEach((v) => queueRemoval(v.id, sh.title));

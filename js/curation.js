@@ -76,10 +76,16 @@ export function buildShelves(items, { interests = [], ctx, helpers, now = new Da
   push({ id: 'think', icon: '🧠', title: 'À méditer', why: 'Analyses, video essays et documentaires.' }, [tag('Analyse / essai')], 'score');
   push({ id: 'chill', icon: '😌', title: 'Détente', why: 'ASMR, lofi, timelapses… à regarder sans réfléchir.' }, [tag('Détente')], 'score');
   push({ id: 'new', icon: '🆕', title: 'Fraîchement publiées', why: 'Publiées il y a moins d\'un mois.' }, [tag('Récente')], 'published', 2);
-  push({ id: 'seen', icon: '🧹', title: 'Déjà vues ?', why: 'Ces vidéos apparaissent dans ton historique : tu peux sans doute les retirer.', cleanup: true }, [tag('Déjà vue')], 'score', 1);
-  push({ id: 'gone', icon: '🚫', title: 'Indisponibles', why: 'Supprimées ou devenues privées : à retirer.', cleanup: true }, [tag('Indisponible')], 'score', 1);
+  {
+    // Déjà vues ou indisponibles, mais encore dans « À regarder plus tard » (sauf celles que tu as gardées).
+    const list = items.filter(({ v, tags }) => !v.keep && (tags.includes('Déjà vue') || tags.includes('Indisponible')))
+      .sort((a, b) => helpers.certainty(b.v) - helpers.certainty(a.v));
+    if (list.length) {
+      shelves.push({ id: 'seen', icon: '🧹', title: 'À retirer de « À regarder plus tard » ?', why: 'Déjà vues (d\'après YouTube ou ton historique) ou devenues indisponibles, mais encore dans ta liste.', cleanup: true, suggestions: true, filters: [], total: list.length, items: list.slice(0, 15) });
+    }
+  }
   // Ordre d'affichage : les favoris passent devant, les thèmes s'intercalent.
-  const ORDER = ['resume', 'ctx', 'fav', 'foryou', 'liked', 'quick', 'theme', 'lost', 'appr', 'aliens', 'learn', 'think', 'chill', 'new', 'seen', 'gone'];
+  const ORDER = ['resume', 'seen', 'ctx', 'fav', 'foryou', 'liked', 'quick', 'theme', 'lost', 'appr', 'aliens', 'learn', 'think', 'chill', 'new'];
   const rank = (sh) => ORDER.indexOf(sh.id.startsWith('theme:') ? 'theme' : sh.id);
   return shelves.map((sh, i) => [sh, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([sh]) => sh);
 }

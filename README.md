@@ -11,6 +11,7 @@ Statique (HTML/CSS/JS sans build), hébergée sur GitHub Pages. Tes données res
 ## Fonctionnalités
 
 - **Accueil = curation automatique**, présentée en rayons : À reprendre, un rayon selon l'heure (Pour le café, Pause déj, Pour la soirée…), Pour toi, Vite vu, ❤️ Tes favoris, 💛 Ceux que tu aimes, 👍 Ceux que tu apprécies, 🕰️ Perdus de vue, tes thèmes (Godot, Figurines…), Les Aliens, Apprendre, À méditer, Détente, Fraîchement publiées, Déjà vues ? (à vider d'un geste)
+- **🧹 À retirer de « À regarder plus tard » ?** : toutes les vidéos déjà vues mais encore dans la liste. Les plus sûres d'abord (barre de progression rouge lue sur YouTube par le script, lecture dans Companion, vidéo indisponible), puis celles présentes dans ton historique. On les retire une par une, toutes d'un coup, ou on les garde (elles ne sont alors plus proposées).
 - **Liste = enchaînement** : « J'ai 15 min / 30 min / 1 h / 2 h » compose une session de vidéos variées (jamais deux fois la même chaîne d'affilée), lue à la suite avec un compte à rebours entre deux vidéos
 - **ⓘ Pourquoi cette vidéo ?** sur chaque vignette : le détail des **+** et des **−** qui la font remonter (créateur, thèmes habituels, centres d'intérêt, déjà vue…), avec des boutons **+ / −** pour en demander plus ou moins (par thème ou par chaîne)
 - **Tags automatiques**

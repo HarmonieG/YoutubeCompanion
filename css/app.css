@@ -305,3 +305,19 @@ details.manual summary { cursor: pointer; color: var(--muted); }
   .hero h2 { font-size: 1.25rem; }
   .shelf header { flex-wrap: wrap; }
 }
+
+/* ---------- suggestions de retrait ---------- */
+#nav small.sugn { color: var(--coral); opacity: 1; margin-left: .15em; }
+.qlist.sug { margin-bottom: 1rem; }
+.qrow b[data-act=open] { cursor: pointer; }
+.qrow small { white-space: normal; }
+.cert { display: inline-block; font-weight: 700; font-size: .72rem; padding: 0 .45em; border-radius: 99px; margin-right: .25em; }
+.cert.c3, .cert.c2, .cert.c25 { background: var(--coral); color: var(--bg); }
+.cert.c1 { border: 1px solid var(--line); color: var(--muted); }
+@media (max-width: 640px) {
+  .qrow { flex-wrap: wrap; }
+  .qrow img { width: 84px; }
+  .qrow div { flex-basis: calc(100% - 100px); }
+  .qrow button { margin-left: auto; }
+  .qrow button + button { margin-left: 0; }
+}

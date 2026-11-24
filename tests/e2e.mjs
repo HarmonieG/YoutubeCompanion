@@ -17,6 +17,7 @@ const items = Array.from({ length: 240 }, (_, i) => ({
   channelTitle: chans[i % chans.length],
   channelId: chanId(i % chans.length),
   duration: 40 + ((i * 397) % 4200),
+  watched: i % 20 === 7 ? 100 : i % 20 === 8 ? 40 : 0,   // barre de progression YouTube
   index: i,
 }));
 const payload = { source: 'plustard-wl', v: 2, items };
@@ -45,6 +46,7 @@ async function newPage(viewport) {
   await ctx.addInitScript(() => { if (location.hostname === 'localhost') localStorage.setItem('yc-token', JSON.stringify({ access_token: 'test', expires_at: Date.now() + 3600e3 })); });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
+  page.on('dialog', (d) => d.accept());
   page.on('console', (m) => { if (m.type() === 'error' && !/ERR_FAILED|net::|404/.test(m.text())) errors.push(m.text()); });
   return page;
 }
@@ -120,6 +122,16 @@ await page.waitForFunction((f) => document.querySelector('#fakeplayer')?.textCon
 log('suivante lancée automatiquement :', await page.locator('.sesspos').innerText());
 await page.click('[data-act=close]');
 log('à retirer', await page.evaluate(() => Object.values(window.__yc.store.state.videos).filter((v) => v.status === 'queued').length));
+
+// ---------- suggestions de retrait ----------
+await page.click('[data-go=queue]');
+await page.waitForSelector('.qlist.sug');
+log('onglet', (await page.locator('#nav [data-go=queue]').innerText()).replace(/\n/g, ' '), '|', (await page.locator('.panel p').first().innerText()).slice(0, 90));
+log('1re suggestion :', (await page.locator('.qlist.sug .qrow small').first().innerText()));
+await page.screenshot({ path: `${OUT}/09-suggestions.png` });
+await page.locator('.qlist.sug [data-act=keep-sug]').first().click();
+await page.click('[data-act=sug-all][data-min="2"]');
+log('après « retirer les sûres » :', await page.evaluate(() => Object.values(window.__yc.store.state.videos).filter((v) => v.status === 'queued').length), 'en file');
 
 await page.click('[data-go=settings]');
 await page.screenshot({ path: `${OUT}/08-reglages.png` });

@@ -245,8 +245,10 @@ export function autoTags(video, ctx) {
   }
   const ct = creatorTag(video, ctx);
   if (ct) tags.push(ct);
-  if (ctx.watched.has(video.id)) tags.push('Déjà vue');
-  if (video.progress > 0.05 && video.progress < s.watchedThreshold) tags.push('Commencée');
+  // Déjà vue : barre de progression YouTube ≥ seuil, ou présente dans l'historique.
+  const prog = Math.max(video.progress || 0, video.ytProgress || 0);
+  if (prog >= s.watchedThreshold || ctx.watched.has(video.id)) tags.push('Déjà vue');
+  else if (prog > 0.05) tags.push('Commencée');
   if (video.unavailable) tags.push('Indisponible');
   if (video.publishedAt && Date.now() - Date.parse(video.publishedAt) < 30 * 864e5) tags.push('Récente');
   if (video.addedAt && Date.now() - video.addedAt > 2 * 365 * 864e5) tags.push('Vieille de la liste');
@@ -317,13 +319,32 @@ export function explain(video, tags, ctx) {
   const cb = key && boosts['ch:' + key];
   if (cb) add(cb * BOOST_STEP, cb > 0 ? `Tu as demandé plus de ${chanName}` : `Tu as demandé moins de ${chanName}`);
 
-  if (tags.includes('Commencée')) add(2, `Déjà commencée (${Math.round((video.progress || 0) * 100)} %)`);
+  const prog = Math.max(video.progress || 0, video.ytProgress || 0);
+  if (tags.includes('Commencée')) add(2, `Déjà commencée (${Math.round(prog * 100)} %)`);
   if (tags.includes('Récente')) add(0.5, 'Publiée il y a moins d\'un mois');
-  if (tags.includes('Déjà vue')) add(-2, 'Présente dans ton historique : peut-être déjà vue');
+  if (tags.includes('Déjà vue')) add(-3, seenReason(video, ctx));
   if (tags.includes('Indisponible')) add(-10, 'Vidéo supprimée ou devenue privée');
 
   reasons.sort((a, b) => Math.abs(b.w) - Math.abs(a.w));
   return { score: reasons.reduce((t, r) => t + r.w, 0), reasons };
+}
+
+// Pourquoi on pense qu'une vidéo a déjà été vue, de la preuve la plus sûre à la moins sûre.
+export function seenReason(video, ctx) {
+  const yt = video.ytProgress || 0, app = video.progress || 0;
+  if (yt >= ctx.state.settings.watchedThreshold) return `YouTube indique que tu l'as regardée à ${Math.round(yt * 100)} %`;
+  if (app >= ctx.state.settings.watchedThreshold) return `Regardée à ${Math.round(app * 100)} % dans Companion`;
+  if (ctx.watched.has(video.id)) return yt > 0.05 ? `Dans ton historique, regardée à ${Math.round(yt * 100)} % sur YouTube` : 'Présente dans ton historique YouTube (au moins ouverte)';
+  return '';
+}
+
+// Certitude que la vidéo est vue : 3 = sûr (barre YouTube), 2 = dans Companion, 1 = historique.
+export function seenCertainty(video, ctx) {
+  const thr = ctx.state.settings.watchedThreshold;
+  if ((video.ytProgress || 0) >= thr) return 3;
+  if ((video.progress || 0) >= thr) return 2;
+  if (ctx.watched.has(video.id)) return 1;
+  return 0;
 }
 
 export function relevance(video, tags, ctx) {

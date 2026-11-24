@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Companion — synchro « À regarder plus tard »
 // @namespace    https://harmonieg.github.io/YoutubeCompanion/
-// @version      1.1.0
+// @version      1.2.0
 // @description  Récupère ta playlist « À regarder plus tard » en quelques secondes, retire les vidéos déjà vues et envoie le tout à YouTube Companion.
 // @author       Harmonie Games
 // @match        https://www.youtube.com/*
@@ -156,6 +156,18 @@
 
   const text = (t) => (t ? (t.simpleText || (t.runs || []).map((r) => r.text).join('') || t.content || '') : '');
 
+  // Pourcentage déjà regardé, tel qu'affiché par la barre rouge sous la miniature.
+  function watchedPct(node, depth = 0) {
+    if (!node || typeof node !== 'object' || depth > 12) return null;
+    if (typeof node.percentDurationWatched === 'number') return node.percentDurationWatched;
+    if (typeof node.startPercent === 'number' && node.startPercent > 0) return node.startPercent;
+    for (const k in node) {
+      const r = watchedPct(node[k], depth + 1);
+      if (r != null) return r;
+    }
+    return null;
+  }
+
   // Parcours générique : on ne dépend pas de la structure exacte (bureau / mobile / nouveaux composants).
   function harvest(node, items, state) {
     if (!node || typeof node !== 'object') return;
@@ -170,6 +182,7 @@
         channelTitle: text(by),
         channelId: run.navigationEndpoint?.browseEndpoint?.browseId || '',
         duration: pv.lengthSeconds ? Number(pv.lengthSeconds) : null,
+        watched: watchedPct(pv.thumbnailOverlays) ?? 0,
         index: items.length,
       });
       return;
@@ -177,7 +190,7 @@
     const lv = node.lockupViewModel;
     if (lv && lv.contentId && /VIDEO/i.test(lv.contentType || 'VIDEO')) {
       const meta = lv.metadata?.lockupMetadataViewModel || {};
-      items.push({ id: lv.contentId, title: meta.title?.content || '', channelTitle: '', channelId: '', duration: null, index: items.length });
+      items.push({ id: lv.contentId, title: meta.title?.content || '', channelTitle: '', channelId: '', duration: null, watched: watchedPct(lv.contentImage) ?? 0, index: items.length });
       return;
     }
     if (node.continuationCommand?.token) state.token = node.continuationCommand.token;

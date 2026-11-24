@@ -37,6 +37,7 @@ export function parseWatchLater(text, fileName = '') {
           channelId: /^UC[\w-]{22}$/.test(i.channelId || '') ? i.channelId : '',
           channelUrl: i.channelUrl || '',
           duration: i.duration ?? parseDurationText(i.durationText),
+          watched: typeof i.watched === 'number' ? Math.max(0, Math.min(100, i.watched)) : undefined,
           position: i.index ?? idx,
         }));
       }

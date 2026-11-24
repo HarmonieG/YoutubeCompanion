@@ -16,6 +16,7 @@ const all = Array.from({ length: 240 }, (_, i) => ({
   title: { runs: [{ text: ['Godot devlog', 'Blender tuto', 'Pixel art', 'Warhammer painting'][i % 4] + ' ' + i }] },
   shortBylineText: { runs: [{ text: 'Chaîne ' + (i % 5), navigationEndpoint: { browseEndpoint: { browseId: 'UC' + String(i % 5).padStart(22, 'x') } } }] },
   lengthSeconds: String(60 + i * 13),
+  thumbnailOverlays: i === 10 ? [{ thumbnailOverlayResumePlaybackRenderer: { percentDurationWatched: 92 } }] : [],
 }));
 let removed = new Set();
 const page = (start, n, token) => {
@@ -109,7 +110,7 @@ const res = await popup.evaluate(() => {
   const v = Object.values(window.__yc.store.state.videos);
   const by = (s) => v.filter((x) => x.status === s).length;
   const kept = window.__yc.store.state.videos.w0000000004;
-  return { total: v.length, active: by('active'), removed: by('removed'), queued: by('queued'), keptTags: kept.manualTags, channelId: v.find((x) => x.id === 'w0000000010').channelId, duration: v.find((x) => x.id === 'w0000000010').duration };
+  return { total: v.length, active: by('active'), removed: by('removed'), queued: by('queued'), keptTags: kept.manualTags, channelId: v.find((x) => x.id === 'w0000000010').channelId, duration: v.find((x) => x.id === 'w0000000010').duration, ytProgress: v.find((x) => x.id === 'w0000000010').ytProgress };
 });
 console.log('app après synchro', res);
 await popup.screenshot({ path: `${OUT}/22-app-apres-synchro.png` });

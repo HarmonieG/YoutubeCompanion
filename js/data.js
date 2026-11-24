@@ -28,6 +28,7 @@ export function importWatchLater(items) {
         addedAt: it.addedAt || null,
         firstSeenAt: now,
         position: it.position,
+        ytProgress: it.watched != null ? it.watched / 100 : undefined,
         status: 'active',
         progress: 0,
         manualTags: [],
@@ -36,6 +37,7 @@ export function importWatchLater(items) {
       res.added++;
     } else {
       v.position = it.position;
+      if (it.watched != null) v.ytProgress = it.watched / 100;
       if (it.title && !v.enriched) v.title = it.title;
       if (it.channelTitle && !v.channelTitle) v.channelTitle = it.channelTitle;
       if (it.channelId && !v.channelId) v.channelId = it.channelId;
@@ -193,10 +195,19 @@ export function queueRemoval(id, reason = 'manuel') {
   store.changed('queue');
 }
 
+// « Garder » une vidéo signalée comme déjà vue : elle ne sera plus proposée au retrait.
+export function keepVideo(id) {
+  const v = S().videos[id];
+  if (!v) return;
+  v.keep = true;
+  store.changed('keep');
+}
+
 export function unqueue(id) {
   const v = S().videos[id];
   if (!v) return;
   v.status = 'active';
+  v.keep = true;
   delete v.queuedReason;
   store.changed('queue');
 }
