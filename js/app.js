@@ -525,7 +525,9 @@ function wlSteps() {
       <b>Ordinateur</b> : <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a>.</li>
     <li>Installe le script : <a class="bm" href="${USERSCRIPT_URL}" target="_blank" rel="noopener">⟳ Script Companion</a>
       <small>(sur iPhone : ouvre le lien dans Safari, touche l'icône Userscripts dans la barre d'adresse puis « Install »)</small></li>
-    <li>Touche <b>Synchroniser</b> : YouTube s'ouvre, ${q ? `retire les ${q} vidéo(s) marquée(s), ` : ''}lit ta liste en quelques secondes, puis touche « Envoyer à Companion ».</li>
+    <li>Touche <b>⟳ Synchroniser</b> ci-dessous : tu arrives sur ta page « À regarder plus tard » de YouTube.</li>
+    <li>Là, ne touche à rien : un panneau sombre apparaît en bas de la page et ${q ? `retire les ${q} vidéo(s) marquée(s), puis ` : ''}compte tes vidéos (quelques secondes).</li>
+    <li>Quand il affiche « ✓ … vidéos récupérées », touche <b>Envoyer à Companion</b> dans ce panneau : Companion se rouvre avec ta liste à jour.</li>
   </ol>
   <div class="row">
     <a class="primary btn" href="${syncUrl()}" data-act="syncyt">⟳ Synchroniser${q ? ` (et retirer ${q})` : ''}</a>
