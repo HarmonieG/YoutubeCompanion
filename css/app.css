@@ -232,3 +232,10 @@ dialog { border: 0; padding: 0; background: var(--bg); color: var(--text); }
   #endsheet { margin: .5rem .5rem 0; padding: .6rem .75rem; font-size: .9rem; }
   .vtop .ghost { padding: .35em .7em; }
 }
+
+/* ---------- mur de connexion ---------- */
+body[data-view=login] .top { display: none; }
+.login { min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: .75rem; }
+.login h1 { font-size: 2rem; color: var(--teal); margin: 0; }
+.login p { color: var(--muted); max-width: 22rem; margin: 0 0 .75rem; }
+.login .err { color: var(--coral); }

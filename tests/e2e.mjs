@@ -37,10 +37,24 @@ async function newPage(viewport) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2 });
   await ctx.route(/fonts\.(googleapis|gstatic)|ytimg|accounts\.google/, (r) => r.abort());
   await ctx.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ contentType: 'text/javascript', body: FAKE_YT }));
+  await ctx.route(/googleapis\.com/, (r) => r.fulfill({ status: 404, body: '{}' }));
+  // Faux jeton pour passer le mur de connexion
+  await ctx.addInitScript(() => { if (location.hostname === 'localhost') localStorage.setItem('yc-token', JSON.stringify({ access_token: 'test', expires_at: Date.now() + 3600e3 })); });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error' && !/ERR_FAILED|net::/.test(m.text())) errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/ERR_FAILED|net::|404/.test(m.text())) errors.push(m.text()); });
   return page;
+}
+
+// ---------- mur de connexion ----------
+{
+  const ctx0 = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+  await ctx0.route(/fonts\.(googleapis|gstatic)|accounts\.google/, (r) => r.abort());
+  const p0 = await ctx0.newPage();
+  await p0.goto(BASE);
+  await p0.waitForSelector('.login');
+  console.log('mur de connexion', await p0.locator('.login [data-act=signin]').count(), 'nav', await p0.locator('#nav button').count());
+  await p0.screenshot({ path: `${OUT}/00-login.png` });
 }
 
 // ---------- mobile ----------

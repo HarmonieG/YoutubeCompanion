@@ -117,12 +117,14 @@ async function signIn() {
   }
   try {
     await auth.signIn(clientId());
+    ui.loginError = '';
     toast('Connecté' + (auth.user?.title ? ' : ' + auth.user.title : ''));
     renderHeader();
     await pullSync();
     return true;
   } catch (e) {
-    toast('Connexion impossible : ' + e.message);
+    ui.loginError = 'Connexion impossible : ' + e.message;
+    toast(ui.loginError);
     return false;
   }
 }
@@ -140,15 +142,35 @@ function go(view) {
 }
 
 function render() {
+  const main = $('#main');
+  // Mur de connexion : rien n'est accessible sans compte Google.
+  // Une fois débloquée, la session reste ouverte même si le jeton expire en cours d'usage.
+  if (!auth.signedIn && !ui.unlocked) {
+    document.body.dataset.view = 'login';
+    $('#nav').innerHTML = '';
+    $('#account').innerHTML = '';
+    main.innerHTML = renderLogin();
+    return;
+  }
+  ui.unlocked = true;
   renderHeader();
   document.body.dataset.view = ui.view;
-  const main = $('#main');
   if (ui.view === 'setup') main.innerHTML = renderSetup();
   else if (ui.view === 'queue') main.innerHTML = renderQueue();
   else if (ui.view === 'import') main.innerHTML = renderImport();
   else if (ui.view === 'settings') main.innerHTML = renderSettings();
   else main.innerHTML = renderLibrary();
   afterRender();
+}
+
+function renderLogin() {
+  return `<section class="login">
+    <img src="icon.svg" alt="" width="72" height="72">
+    <h1>Companion</h1>
+    <p>Tague, filtre et regarde ta playlist « À regarder plus tard ».</p>
+    <button class="primary" data-act="signin">Se connecter avec Google</button>
+    ${ui.loginError ? `<p class="hint err">${esc(ui.loginError)}</p>` : ''}
+  </section>`;
 }
 
 function renderHeader() {
@@ -806,7 +828,7 @@ document.addEventListener('click', async (e) => {
 
   switch (act) {
     case 'signin': await signIn(); render(); break;
-    case 'signout': if (await confirmBox('Se déconnecter de Google ?')) { auth.signOut(); render(); } break;
+    case 'signout': if (await confirmBox('Se déconnecter de Google ?')) { auth.signOut(); ui.unlocked = false; render(); } break;
     case 'open': if ($('#video').open) { player?.destroy(); } openVideo(id); break;
     case 'queue': {
       queueRemoval(id, 'manuel');

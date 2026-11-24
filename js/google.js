@@ -32,7 +32,7 @@ export const auth = {
 
   restore() {
     try {
-      const t = JSON.parse(sessionStorage.getItem('yc-token') || 'null');
+      const t = JSON.parse(localStorage.getItem('yc-token') || 'null');
       if (t && t.expires_at > Date.now() + 60e3) token = t;
       this.user = JSON.parse(localStorage.getItem('yc-user') || 'null');
     } catch { /* rien */ }
@@ -50,7 +50,7 @@ export const auth = {
           const p = pending; pending = null;
           if (resp.error) return p?.reject(new Error(resp.error_description || resp.error));
           token = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in - 60) * 1000 };
-          sessionStorage.setItem('yc-token', JSON.stringify(token));
+          localStorage.setItem('yc-token', JSON.stringify(token));
           p?.resolve(token);
         },
         error_callback: (err) => { const p = pending; pending = null; p?.reject(new Error(err.message || err.type)); },
@@ -72,7 +72,7 @@ export const auth = {
   signOut() {
     if (token && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(token.access_token, () => {});
     token = null; this.user = null;
-    sessionStorage.removeItem('yc-token');
+    localStorage.removeItem('yc-token');
     localStorage.removeItem('yc-user');
   },
 
